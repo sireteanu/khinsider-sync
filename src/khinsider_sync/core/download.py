@@ -166,7 +166,7 @@ class Downloader:
         except FileNotFoundError:
             st = None
         rec = self.manifest.get(rel)
-        action, reason = plan(dest, rec, info, check_remote=self.cfg.check_remote,
+        action, reason = plan(dest, rec, info,
                               overwrite=self.cfg.overwrite, st=st)
         if action in FETCH_ACTIONS:
             return action, reason

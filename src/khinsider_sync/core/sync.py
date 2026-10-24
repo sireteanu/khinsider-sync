@@ -256,7 +256,7 @@ class Manifest:
 
 
 # --------------------------------------------------------------------------- decisions
-def plan(dest: str, rec: Optional[Record], info: FileInfo, *, check_remote: bool = False,
+def plan(dest: str, rec: Optional[Record], info: FileInfo, *,
          overwrite: bool = False, st=...) -> tuple:
     """Decide what to do with one listed file -> (action, reason). `st`: os.stat(dest) if the
     caller already has it (None = the file doesn't exist), so the disk is asked only once."""
@@ -285,7 +285,7 @@ def plan(dest: str, rec: Optional[Record], info: FileInfo, *, check_remote: bool
             return UPDATE, f"size changed on the site ({rec.page_size} -> {info.size})"
         if info.size and size_matches(size, info.size) is False:
             return UPDATE, f"size on the site is {info.size}"
-        if check_remote or (not info.date and not info.size and (rec.last_modified or rec.etag)):
+        if not info.date and not info.size and (rec.last_modified or rec.etag):
             return CHECK, "asking the server whether it changed"
         return SKIP, "up to date"
 
@@ -298,6 +298,6 @@ def plan(dest: str, rec: Optional[Record], info: FileInfo, *, check_remote: bool
         return UPDATE, f"size on the site is {info.size}"
     if newer:
         return UPDATE, f"newer on the site ({info.date})"
-    if check_remote or (not info.date and not info.size):
+    if not info.date and not info.size:
         return CHECK, "asking the server whether it changed"
     return ADOPT, "already in the folder"

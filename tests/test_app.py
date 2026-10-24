@@ -160,12 +160,11 @@ def test_read_ticked_album_pages_as_a_job(site, app_factory):
 def test_settings_validate_and_persist(site, app_factory):
     c = app_factory(site)
     r = c.post("/api/settings", json={"parallel": "4", "max_rate": "5M", "formats": "best",
-                                      "folder_layout": "platform", "platform_types": "Gamerip, Soundtrack",
-                                      "album_refresh_days": "3"})
+                                      "folder_layout": "platform", "platform_types": "Gamerip, Soundtrack"})
     assert r.status_code == 200
     s = c.get("/api/settings").json()["settings"]
     assert (s["parallel"], s["max_rate"], s["formats"], s["folder_layout"]) == ("4", "5M", "best", "platform")
-    assert s["platform_types"] == ["Gamerip", "Soundtrack"] and s["album_refresh_days"] == 3
+    assert s["platform_types"] == ["Gamerip", "Soundtrack"]
     for bad in ({"max_rate": "fast"}, {"formats": ".exe"}, {"folder_layout": "letters"}, {"file_mode": "999"},
                 {"track_names": "fancy"}):
         r = c.post("/api/settings", json=bad)

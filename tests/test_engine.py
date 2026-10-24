@@ -33,19 +33,25 @@ def test_a_second_sync_downloads_nothing_and_asks_for_nothing(site, app_factory)
     first_sync(c)
     site.reset_log()
     st = sync(c)
-    assert st["sync"]["up to date"] == 4 and st["sync"]["new"] == 0
+    assert st["sync"]["albums_done"] == 1 and st["sync"]["new"] == 0 and st["sync"]["total"] == 0
     assert not site.file_requests() and not site.track_pages()
-    assert not site.album_pages(), "album pages read within the last 7 days aren't read again"
+    assert not site.album_pages(), "an album page is read once"
 
 
-def test_album_pages_are_read_again_after_the_set_days(site, app_factory):
-    c = app_factory(site, settings={"album_refresh_days": 0})
+def test_a_downloaded_album_is_never_checked_again(site, app_factory):
+    c = app_factory(site)
     first_sync(c)
+    a = c.get("/api/albums", params={"show": "downloaded"}).json()["albums"]
+    assert [x["slug"] for x in a] == [SMW] and a[0]["downloaded"] and a[0]["downloaded_at"]
     site.albums[SMW]["tracks"].append(("", "4", "04. Castle", "Castle", "2:00"))
+    site.modify(SMW, "02. Title Screen.mp3", grow=50_000)
+    select(c, "a:" + BIRD)
     site.reset_log()
     st = sync(c)
-    assert len(site.album_pages()) == 1 and st["sync"]["new"] == 1
-    assert "Super Mario World/04. Castle.mp3" in on_disk(c.data)
+    assert not [p for p in site.paths() if SMW in p], "nothing about the downloaded album is asked"
+    assert st["sync"]["albums_done"] == 1 and st["sync"]["new"] == 3 and st["sync"]["up to date"] == 0
+    assert "Super Mario World/04. Castle.mp3" not in on_disk(c.data)
+    assert st["selection"]["downloaded"] == 2 and st["selection"]["albums"] == 2
 
 
 def test_flac_best_and_every_format(site, app_factory):
@@ -104,22 +110,29 @@ def test_stop_keeps_the_part_file_and_the_next_sync_finishes_it(site_factory, ap
     assert on_disk(c.data) == {"Big Album/01. Big Track.mp3"}
 
 
-def test_a_changed_file_on_the_site_is_downloaded_again(site, app_factory):
-    c = app_factory(site, settings={"album_refresh_days": 0})
+def test_reading_an_album_page_by_hand_picks_up_new_tracks(site, app_factory):
+    c = app_factory(site)
     first_sync(c)
-    site.modify(SMW, "02. Title Screen.mp3", grow=50_000)        # its listed size changes
+    site.albums[SMW]["tracks"].append(("", "4", "04. Castle", "Castle", "2:00"))
+    assert c.post("/api/album/read", json={"slug": SMW}).status_code == 200
+    a = c.get("/api/albums", params={"show": "partly"}).json()["albums"]
+    assert [x["slug"] for x in a] == [SMW]
+    site.reset_log()
     st = sync(c)
-    assert st["sync"]["updated"] == 1 and st["sync"]["new"] == 0
-    with open(c.data / "Super Mario World" / "02. Title Screen.mp3", "rb") as f:
-        assert f.read() == site.content(SMW, "02. Title Screen.mp3")
+    assert st["sync"]["new"] == 1 and "Super Mario World/04. Castle.mp3" in on_disk(c.data)
 
 
-def test_a_deleted_file_is_downloaded_again(site, app_factory):
+def test_check_files_finds_deleted_ones_for_the_next_sync(site, app_factory):
     c = app_factory(site)
     first_sync(c)
     os.remove(c.data / "Super Mario World" / "03. Overworld.mp3")
+    assert sync(c)["sync"]["new"] == 0, "a downloaded album isn't looked at by a sync"
+    r = c.post("/api/album/check", json={"slug": SMW}).json()
+    assert r["missing"] == ["Super Mario World/03. Overworld.mp3"]
+    assert not album(c, SMW)["album"]["downloaded"]
     st = sync(c)
     assert st["sync"]["new"] == 1 and "Super Mario World/03. Overworld.mp3" in on_disk(c.data)
+    assert c.post("/api/album/check", json={"slug": "nope"}).status_code == 404
 
 
 def test_files_already_in_the_folder_are_adopted(site, app_factory):
@@ -205,14 +218,16 @@ def test_saved_as_puts_an_album_elsewhere(site, app_factory):
 
 
 def test_an_album_moved_to_a_new_address_keeps_its_tick_and_folder(site, app_factory):
-    c = app_factory(site, settings={"album_refresh_days": 0})
+    c = app_factory(site)
     first_sync(c)
     site.rename(SMW, "super-mario-world-snes")
-    site.reset_log()
-    st = sync(c)
-    assert st["sync"]["up to date"] == 4 and st["sync"]["new"] == 0
+    st = scan(c)
     assert any("moved album" in m for m in log_lines(st))
     assert c.get("/api/albums", params={"show": "ticked"}).json()["albums"][0]["slug"] == "super-mario-world-snes"
+    site.reset_log()
+    st = sync(c)
+    assert st["sync"]["new"] == 0 and st["sync"]["up to date"] + st["sync"]["already in folder"] == 4
+    assert not site.file_requests()
     assert on_disk(c.data) == SMW_MP3 | {"Super Mario World/Cover.jpg"}
 
 
@@ -264,7 +279,8 @@ def test_requests_look_like_chrome_unless_turned_off(site, app_factory):
     ua = {h.get("User-Agent", "") for p, h in site.requests if "/album/" in p or p.startswith("/soundtracks/")}
     assert ua and all("Chrome/" in u for u in ua), ua
     assert any("Sec-Ch-Ua" in h for p, h in site.requests if "/album/" in p)
-    c.post("/api/settings", json={"impersonate": False, "album_refresh_days": 0})
+    c.post("/api/settings", json={"impersonate": False})
+    select(c, "a:" + BIRD)
     site.reset_log()
     sync(c)
     ua = {h.get("User-Agent", "") for p, h in site.requests}

@@ -69,6 +69,7 @@
   <div class="legend">
     <span><i class="sw synced"></i><span id="lg-synced">Synced 0 B</span></span>
     <span><i class="sw todo"></i><span id="lg-todo">To download 0 B</span></span>
+    <span id="lg-done"></span>
     <span id="lg-unread" class="muted"></span>
     <span id="lg-dest" class="muted"></span>
   </div>
@@ -86,7 +87,8 @@
         <select id="f-type" aria-label="Album type"><option value="">Every type</option></select>
         <select id="f-show" aria-label="Show">
           <option value="all">All albums</option><option value="ticked">Ticked</option>
-          <option value="synced">With synced files</option><option value="failed">With problems</option>
+          <option value="downloaded">Downloaded</option><option value="partly">Partly downloaded</option>
+          <option value="notdownloaded">Not downloaded</option><option value="failed">With problems</option>
         </select>
       </div>
       <div class="list-head">
@@ -155,6 +157,7 @@
   <div class="al-bar">
     <label class="check"><input type="checkbox" id="al-tick"><span id="al-tick-text">Sync this album</span></label>
     <span class="grow"></span>
+    <button id="al-check" class="btn small" type="button" title="Look in the download folder for this album's files; missing ones are downloaded again by the next sync" hidden>Check files</button>
     <button id="al-read" class="btn small" type="button" title="Read the album's page on khinsider again">Read album page</button>
     <a id="al-site" class="btn small ghost" target="_blank" rel="noopener">Open on khinsider</a>
   </div>
@@ -220,8 +223,6 @@
       <div id="types-list" class="types-list"></div>
       <small>None ticked = every type. Albums you tick one by one are always synced.</small></fieldset>
     <div class="row2">
-      <label class="field"><span>Re-read ticked album pages after</span><span class="unit"><input name="album_refresh_days" type="number" min="0" step="1"> days</span>
-        <small>Before a sync. Picks up tracks added to an album. 0 = before every sync.</small></label>
       <label class="field"><span>When the site is down, wait up to</span><span class="unit"><input name="outage_wait_hours" type="number" min="0" step="0.5"> hours</span>
         <small>Downloads hold and continue when it's back. 0 = don't wait.</small></label>
     </div>
@@ -244,7 +245,6 @@
       <label class="field"><span>Scan the site every</span><span class="unit"><input name="full_scan_every_days" type="number" min="0" step="1"> days</span><small>Finds new albums for ticked platforms.</small></label>
     </div>
     <label class="check"><input type="checkbox" name="resume_interrupted"> Continue an unfinished sync when the app starts again (after a restart, crash or reboot)</label>
-    <label class="check"><input type="checkbox" name="check_remote"> Ask the server about every file I already have (exact, but one request per file)</label>
     <label class="check"><input type="checkbox" name="impersonate"> Look like Chrome to khinsider (its Cloudflare protection can turn other programs away)</label>
     <p id="settings-error" class="error" hidden></p>
     <div class="dlg-foot"><button class="btn ghost" value="cancel">Cancel</button><button class="btn primary" id="settings-save" value="save">Save settings</button></div>
@@ -290,7 +290,7 @@
 <template id="album-tpl">
   <div class="arow" role="listitem">
     <input type="checkbox" class="tick">
-    <span class="aname"><b class="n"></b><span class="sub"></span></span>
+    <span class="aname"><span class="nline"><b class="n"></b><span class="badge" hidden></span></span><span class="sub"></span></span>
     <span class="c-num year"></span>
     <span class="c-num size"></span>
     <span class="c-meter"><span class="meter"><span class="fill"></span></span><span class="pct"></span></span>

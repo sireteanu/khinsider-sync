@@ -14,7 +14,6 @@ class Config:
     user_agent: str = DEFAULT_UA
     # downloading
     download_dir: Optional[str] = None
-    check_remote: bool = False        # ask the server about every file already in the folder
     min_free: int = 2 * 1024 ** 3
     file_mode: Optional[int] = None       # e.g. 0o777: permissions for saved files and their folders
     retry_wait: float = 2.0           # first wait between a file's retries (doubles each time, max 60 s)

@@ -3,7 +3,7 @@ from conftest import BIRD, SMW, on_disk, scan, select, sync, wait
 
 
 def setup(site, app_factory, **kw):
-    c = app_factory(site, settings={"album_refresh_days": 0}, **kw)
+    c = app_factory(site, **kw)
     scan(c)
     select(c, "a:" + SMW)
     select(c, "a:" + BIRD)
@@ -23,6 +23,7 @@ def test_lists_unticked_removed_and_unneeded_partial_files(site, app_factory):
     assert leftovers(c) == {}
     select(c, "a:" + BIRD, False)                                               # unticked
     site.albums[SMW]["tracks"].pop()                                            # removed from its album
+    c.post("/api/album/read", json={"slug": SMW})                              # ... seen when read again
     (c.data / "A Bird Story" / "Yesterday - Kan (Reives) Gao.ogg.part").write_bytes(b"x" * 10)
     sync(c)
     got = leftovers(c)

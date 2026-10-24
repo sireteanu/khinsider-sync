@@ -333,12 +333,12 @@ class Engine:
                 continue
             if k in ("interrupted_job", "album_places", "album_formats"):
                 continue
-            if k in ("parallel_max", "sync_every_hours", "full_scan_every_days", "album_refresh_days"):
+            if k in ("parallel_max", "sync_every_hours", "full_scan_every_days"):
                 v = max(0, int(float(v or 0)))
             if k == "outage_wait_hours":
                 v = max(0.0, float(v or 0))
                 v = int(v) if v == int(v) else v
-            if k in ("check_remote", "resume_interrupted", "album_art", "art_folder", "impersonate"):
+            if k in ("resume_interrupted", "album_art", "art_folder", "impersonate"):
                 v = bool(v)
             if k == "track_names" and v not in ("site", "numbered"):
                 raise ValueError("track names must be site or numbered")
@@ -487,16 +487,13 @@ class Engine:
             log.warning("Nothing is ticked - tick the albums or platforms you want, then sync.")
             return {"files": 0}
         albums = self.catalog.albums_by_slug(slugs)
-        # album pages: read the ones never read, and the ones read longer ago than the setting says
-        days = float(s.get("album_refresh_days") or 0)
-        cutoff = time.time() - days * 86400
-        stale = [a for a in slugs if a in albums and not albums[a]["missing"]
-                 and (not albums[a]["read"] or days <= 0 or albums[a]["read"] < cutoff)]
-        if stale:
+        # khinsider doesn't change albums once they're up: a page is read once, the first time its
+        # album is synced (or opened), and never again
+        unread = [a for a in slugs if a in albums and not albums[a]["missing"] and not albums[a]["read"]]
+        if unread:
             self.job["phase"] = "reading album pages"
-            log.info("Reading %d album pages first (%d never read)", len(stale),
-                     sum(1 for a in stale if not albums[a]["read"]))
-            res = await self._scanner(client, robots).read_albums(stale, "album pages")
+            log.info("Reading %d album pages first", len(unread))
+            res = await self._scanner(client, robots).read_albums(unread, "album pages")
             if self.stop_requested:
                 return {}
             if res["renamed"]:
@@ -504,6 +501,11 @@ class Engine:
             albums = self.catalog.albums_by_slug(slugs)
         self.scanner = None
         self.job["phase"] = "checking what needs downloading"
+        # albums already downloaded are done for good: no requests and no disk checks for them
+        done = {a for a, d in albums.items() if d["read"] and self.catalog.album_totals(a, d["formats"], s)["downloaded"]}
+        if done:
+            log.info("%d ticked albums are already downloaded - skipped", len(done))
+        albums = {a: d for a, d in albums.items() if a not in done}
         # each album's files in the order of its formats setting: with "FLAC, then MP3", every
         # FLAC file of the sync is queued before the first MP3 file, album by album within that
         plan = {a: album_plan(s, a, d["formats"]) for a, d in albums.items()}
@@ -515,7 +517,7 @@ class Engine:
         unread = [a for a in slugs if a in albums and not albums[a]["read"]]
         if unread:
             log.warning("%d ticked albums couldn't be read and are left out of this sync", len(unread))
-        cfg = Config(start_url=self.base, download_dir=data_dir, check_remote=bool(s["check_remote"]),
+        cfg = Config(start_url=self.base, download_dir=data_dir,
                      min_free=parse_size(str(s["min_free"] or "0")),
                      file_mode=int(parse_mode(s.get("file_mode", "")), 8) if parse_mode(s.get("file_mode", "")) else None,
                      user_agent=USER_AGENT, retry_wait=self.tuning.get("retry", 2.0),
@@ -533,7 +535,8 @@ class Engine:
                                  ramp_secs=t.get("ramp", 3.0), probe_secs=t.get("probe", 120.0),
                                  confirm_secs=t.get("confirm", 30.0))
         rate = parse_size(str(s["max_rate"])) if s["max_rate"] else 0
-        st = self.sync_stats = {"total": len(rows), "albums": len(albums), "planned": 0, "to_fetch": 0,
+        st = self.sync_stats = {"total": len(rows), "albums": len(albums), "albums_done": len(done),
+                                "planned": 0, "to_fetch": 0,
                                 "new": 0, "updated": 0, "resumed": 0, "up to date": 0, "already in folder": 0,
                                 "failed": 0, "bytes_planned": 0, "bytes_settled": 0, "files_left": 0}
 
@@ -664,7 +667,7 @@ class Engine:
             manifest.close()
             self.catalog.commit()
             self.speed = self.eta_speed = 0.0
-        summary = {k: st[k] for k in ("total", "albums", "to_fetch", "new", "updated", "resumed", "up to date",
+        summary = {k: st[k] for k in ("total", "albums", "albums_done", "to_fetch", "new", "updated", "resumed", "up to date",
                                       "already in folder", "failed")}
         summary["bytes"] = dl.bytes
         summary["paused"] = dl.paused
@@ -694,6 +697,20 @@ class Engine:
         return {os.path.dirname(src)}
 
     # ------------------------------------------------------------------ one album, now
+    def check_album(self, slug: str) -> dict:
+        """Look on disk for an album's downloaded files (they are never checked by a sync once the
+        album is downloaded). Missing ones are downloaded again by the next sync."""
+        if self.catalog.album(slug) is None:
+            raise ValueError("no such album")
+        root = self.data_dir
+        gone = self.catalog.forget_missing(
+            slug, lambda rel: os.path.isfile(os.path.join(root, *rel.split("/"))))
+        self._sel_cache = None
+        if gone:
+            log.info("%d files of %s are missing from the download folder - the next sync gets them again",
+                     len(gone), slug)
+        return {"slug": slug, "missing": gone}
+
     async def read_album_now(self, slug: str) -> dict:
         """Read one album's page right away (opening an album in the page), outside the job queue."""
         async with self._client() as client:
@@ -788,8 +805,8 @@ class Engine:
             return dict(self._sel_cache[1])
         slugs = self.catalog.selected_albums(rules, s.get("platform_types") or [])
         albums = self.catalog.albums_by_slug(slugs)
-        sel = {"albums": len(slugs), "unread": 0, "files": 0, "bytes": 0, "synced": 0, "synced_bytes": 0,
-               "failed": 0}
+        sel = {"albums": len(slugs), "unread": 0, "downloaded": 0, "files": 0, "bytes": 0, "synced": 0,
+               "synced_bytes": 0, "failed": 0}
         for slug, a in albums.items():
             if not a["read"]:
                 sel["unread"] += 1
@@ -797,6 +814,7 @@ class Engine:
             t = self.catalog.album_totals(slug, a["formats"], s)
             for k in ("files", "bytes", "synced", "synced_bytes", "failed"):
                 sel[k] += t[k]
+            sel["downloaded"] += t["downloaded"]
         self._sel_cache = (key, dict(sel))
         return sel
 

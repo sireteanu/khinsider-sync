@@ -196,6 +196,7 @@ class Scanner:
         status = "stopped" if self.stopping else "done"
         gone: list = []
         if status == "done" and not self.errors and self.albums:
+            await self._follow_moved(scan_id)
             gone = self.catalog.prune(scan_id)
         elif status == "done":
             status = "incomplete"
@@ -208,6 +209,23 @@ class Scanner:
                  f" (the site says {expected})" if expected and abs(expected - self.albums) > 0 else "")
         return {"pages": self.pages, "albums": self.albums, "new": self.new, "errors": self.errors,
                 "removed": len(gone), "status": status, "named": named}
+
+    async def _follow_moved(self, scan_id: int) -> None:
+        """Albums you downloaded that the lists no longer show may have moved to a new address
+        (their page redirects there): their ticks and folder follow them instead of the album
+        being forgotten and, through a ticked platform, downloaded a second time."""
+        for slug in self.catalog.vanished_downloaded(scan_id):
+            if self.stopping:
+                return
+            try:
+                final, body = await self._fetch(album_url(self.base, slug))
+            except FetchError:
+                continue
+            new = parse.album_slug(final)
+            if new and new != slug and not parse.parse_album(body or b"", final)["missing"]:
+                self.catalog.rename_album(slug, new)
+                self.catalog.mark_seen(new, scan_id)
+                log.info("The site moved album %s to %s - its tick and folder follow", slug, new)
 
     # ------------------------------------------------------------------ album pages
     async def read_albums(self, slugs: list, what: str = "albums") -> dict:

@@ -15,7 +15,9 @@ def test_each_counter_lists_its_files(site_factory, app_factory):
     assert [f["path"] for f in failed["files"]] == ["Big Album/03. Broken.mp3"] and failed["files"][0]["note"]
     sync(c)
     up = c.get("/api/sync/files", params={"kind": "uptodate"}).json()
-    assert up["total"] == 5
+    # Super Mario World is downloaded and left alone; Big Album isn't (its broken track), so its
+    # good track is checked again and found up to date
+    assert up["total"] == 1 and up["files"][0]["path"] == "Big Album/01. Big Track.mp3"
     assert c.get("/api/sync/files", params={"kind": "nope"}).status_code == 400
 
 

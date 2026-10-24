@@ -93,7 +93,13 @@ tests/  conftest (app_factory + API helpers), mock_site, fixtures/ (real markup 
 8. **Getting through**: with `impersonate` (default) the client uses `browser.ChromeTransport` and only
    adds `Referer`; otherwise `browser_headers()` (browser-like Accept headers + Referer). Every
    request names khinsider as Referer - its download servers expect it.
-9. Politeness: page reads 4 at a time with pacing (`Limiter`), downloads start at 2 parallel and
+9. **Downloaded albums are final**: khinsider doesn't change albums. A sync reads an album page
+   only if it was never read, and skips albums whose wanted files are all downloaded
+   (`album_totals()["downloaded"]`) - no request, no disk access. "Read album page" (by hand) and
+   "Check files" (`Engine.check_album`, `Catalog.forget_missing`) are the only ways back in. Before a
+   full scan prunes, downloaded albums the lists no longer show are looked up once
+   (`Scanner._follow_moved`) so a moved album keeps its tick and folder.
+10. Politeness: page reads 4 at a time with pacing (`Limiter`), downloads start at 2 parallel and
    ramp; respect robots.txt (it only disallows /unavailable).
 
 ## Publishing (GitHub: sireteanu/khinsider-sync)

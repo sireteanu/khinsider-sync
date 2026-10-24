@@ -363,3 +363,10 @@ table.files tr.unwanted td { opacity: .45; }
 @media (max-width: 640px) { .fmt-list { columns: 1; } }
 .field .check input[type=checkbox] { width: auto; padding: 0; flex: none; }
 .fmt-list li .check span { white-space: nowrap; }
+.nline { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.nline .n { min-width: 0; }
+.badge { flex: none; font-size: 11px; font-weight: 600; padding: 0 7px; border-radius: 9px; border: 1px solid; line-height: 17px; }
+.badge[hidden] { display: none; }
+.badge.done { color: var(--teal); border-color: var(--teal); }
+.badge.part { color: var(--amber); border-color: var(--amber); }
+.arow.done .aname .n { color: var(--ink-2); }

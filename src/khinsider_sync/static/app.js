@@ -116,6 +116,16 @@ function fillAlbum(el, a) {
   el._a = a;
   el.dataset.slug = a.slug;
   $(".n", el).textContent = a.name;
+  const badge = $(".badge", el);
+  badge.hidden = !a.synced;
+  if (a.synced) {
+    badge.textContent = a.downloaded ? "Downloaded" : "Partly downloaded";
+    badge.className = "badge " + (a.downloaded ? "done" : "part");
+    badge.title = a.downloaded
+      ? `Already in your download folder${a.downloaded_at ? " (since " + new Date(a.downloaded_at * 1000).toLocaleDateString() + ")" : ""} - syncs leave it alone`
+      : `${num(a.synced)} of ${nFiles(a.files)} downloaded - the next sync gets the rest`;
+  }
+  el.classList.toggle("done", !!a.downloaded);
   const sub = [a.platforms.join(", ") || "No platform", a.type, a.own_formats && a.own_formats.toUpperCase()].filter(Boolean).join(" · ");
   $(".sub", el).textContent = sub;
   el.title = a.title && a.title !== a.name ? a.title : a.name;
@@ -288,6 +298,7 @@ function showAlbum(d) {
     refreshList(); loadPlatforms(); poll(true);
   };
   $("#al-site").href = d.page;
+  $("#al-check").hidden = !a.synced;
   const fsel = $("#al-formats");
   const names = { mp3: "MP3", flac: "FLAC where offered", best: "best quality", all: "every format" };
   const describe = (v) => {
@@ -313,6 +324,9 @@ function showAlbum(d) {
   const sub = $("#al-sub");
   if (a.missing) sub.textContent = "khinsider no longer has this album.";
   else if (!a.read) sub.textContent = a.error ? `Its page couldn't be read: ${a.error}` : "Reading the album's page…";
+  else if (a.downloaded) sub.textContent = `Downloaded${a.downloaded_at ? " on " + new Date(a.downloaded_at * 1000).toLocaleDateString() : ""}: `
+    + `all ${nFiles(a.files)} (${bytes(a.bytes)}) are in your download folder. Syncs leave it alone; "Check files" looks for any you deleted.`
+    + ` Greyed rows aren't synced (format or image setting).`;
   else sub.textContent = `A sync saves ${nFiles(a.files)} of this album (${bytes(a.bytes)}); ${num(a.synced)} ${a.synced === 1 ? "is" : "are"} in the folder`
     + (a.failed ? `, ${num(a.failed)} failed` : "") + `. Page read ${ago(a.read)}. Greyed rows aren't synced (format or image setting).`;
   const body = $("#al-body");
@@ -320,7 +334,7 @@ function showAlbum(d) {
   for (const f of d.files) {
     const tr = document.createElement("tr");
     if (!f.wanted) tr.className = "unwanted";
-    const status = f.local ? (f.local === "already in folder" ? "in folder" : f.local === "up to date" ? "synced" : f.local)
+    const status = f.local ? (f.local === "already in folder" ? "was in folder" : "downloaded")
       : f.error ? "failed" : f.wanted ? "not synced" : "-";
     const n = f.kind === "art" ? "" : (f.disc ? f.disc + "-" : "") + (f.num || "");
     for (const v of [n, f.kind === "art" ? f.name : f.title || f.name, FMT(f.kind === "art" ? "art" : f.ext), f.size || ""]) {
@@ -348,6 +362,18 @@ async function readAlbum(slug) {
   btn.disabled = false;
 }
 $("#al-read").addEventListener("click", () => current && readAlbum(current));
+$("#al-check").addEventListener("click", async () => {
+  if (!current) return;
+  const slug = current;
+  try {
+    const r = await api("/api/album/check", { method: "POST", body: { slug } });
+    await openAlbum(slug, false);
+    $("#al-sub").textContent = r.missing.length
+      ? `${nFiles(r.missing.length)} missing from the download folder - the next sync downloads ${r.missing.length === 1 ? "it" : "them"} again.`
+      : "Every file is still in the download folder.";
+    refreshList(); poll(true);
+  } catch (e) { alert("Could not check the files: " + e.message); }
+});
 $("#al-close").addEventListener("click", () => $("#album-dlg").close());
 async function savePlace() {
   const input = $("#al-place");
@@ -426,6 +452,7 @@ function renderStatus(st) {
   $("#bar-todo").style.width = (100 * todo / tot) + "%";
   $("#lg-synced").textContent = `Synced ${bytes(sel.synced_bytes)} (${nFiles(sel.synced)})`;
   $("#lg-todo").textContent = `To download ${bytes(todo)} (${nFiles(Math.max(0, sel.files - sel.synced))})`;
+  $("#lg-done").textContent = sel.albums ? `${num(sel.downloaded)} of ${nAlbums(sel.albums)} downloaded` : "";
   $("#lg-unread").textContent = sel.unread ? `${nAlbums(sel.unread)} not read yet: their size counts once the next sync reads them` : "";
   $("#lg-dest").textContent = `Saving to ${st.data_dir}`;
   $("#empty").hidden = !!cat.albums || busy;
@@ -460,6 +487,7 @@ function renderStatus(st) {
     setStats(sy, [["New", num(s.new), "", "new"], ["Updated", num(s.updated), s.updated ? "warn" : "", "updated"],
       ["Resumed", num(s.resumed), "", "resumed"], ["Up to date", num(uptodate), "", "uptodate"],
       ["Failed", num(s.failed), s.failed ? "bad" : "", "failed"], ["Downloaded", bytes(s.bytes)],
+      ["Albums already done", num(s.albums_done || 0)],
       ["Speed", syncing ? bytes(s.speed) + "/s" : "-"],
       ["Parallel", syncing ? `${s.running} (${s.gate})` : "-"]]);
   } else sy.hidden = true;
@@ -718,7 +746,6 @@ $("#btn-settings").addEventListener("click", async () => {
     box.append(l);
   }
   if (!box.children.length) box.innerHTML = '<span class="muted small">Scan the site first.</span>';
-  form.album_refresh_days.value = s.album_refresh_days ?? 7;
   const auto = String(s.parallel) === "auto";
   form.parallel_mode.value = auto ? "auto" : "fixed";
   form.parallel_n.value = auto ? s.parallel_max : s.parallel;
@@ -727,7 +754,6 @@ $("#btn-settings").addEventListener("click", async () => {
   form.file_mode.value = s.file_mode || "";
   form.sync_every_hours.value = s.sync_every_hours;
   form.full_scan_every_days.value = s.full_scan_every_days;
-  form.check_remote.checked = !!s.check_remote;
   form.outage_wait_hours.value = s.outage_wait_hours ?? 12;
   form.resume_interrupted.checked = s.resume_interrupted !== false;
   $("#settings-error").hidden = true;
@@ -744,14 +770,12 @@ $("#settings-save").addEventListener("click", async (e) => {
     track_names: form.track_names.value,
     impersonate: form.impersonate.checked,
     platform_types: [...document.querySelectorAll("#types-list input:checked")].map((i) => i.value),
-    album_refresh_days: form.album_refresh_days.value || 0,
     parallel: auto ? "auto" : form.parallel_n.value,
     max_rate: form.max_rate.value.trim(),
     min_free: form.min_free.value.trim() || "0",
     file_mode: form.file_mode.value.trim(),
     sync_every_hours: form.sync_every_hours.value || 0,
     full_scan_every_days: form.full_scan_every_days.value || 0,
-    check_remote: form.check_remote.checked,
     outage_wait_hours: form.outage_wait_hours.value || 0,
     resume_interrupted: form.resume_interrupted.checked,
   };
@@ -1044,5 +1068,6 @@ themeLabel();
 /* ---------------------------------------------------------------- start */
 $("#search").value = "";
 $("#f-type").value = view.type;
+if (view.show === "synced") view.show = "downloaded";          // the name before 1.0.2
 $("#f-show").value = view.show;
 loadPlatforms().then(() => reload()).catch(() => reload()).finally(() => poll());

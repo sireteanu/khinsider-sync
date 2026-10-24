@@ -52,7 +52,8 @@ modest, don't sync the whole site, and consider [donating](https://downloads.khi
 | Track names | As khinsider names them (`1-01. Title.mp3`), or numbered from the album page's disc and track columns (`01 - Title.mp3`, `1-01 - Title.flac`). |
 | Getting through | Requests look like Chrome (its TLS fingerprint and headers, via curl_cffi) and name khinsider as the Referer, as khi-explorer does, so Cloudflare's bot protection lets them through. Can be turned off. |
 | Folders | One folder per album, named after the album (clashing names get the type and year added). Optionally grouped by platform, type or year. **Saved as** puts one album anywhere you like. Changing either **moves** what you already have instead of downloading it again. |
-| Sync | Reads the ticked albums' pages (new ones always, others when older than "Re-read after N days"), then downloads only what's missing, half-finished (`.part`, resumed) or changed (its size on the album page differs). Unchanged files cost no request. |
+| Sync | Reads each ticked album's page once (the first time it's synced or opened), then downloads what's missing or half-finished (`.part`, resumed). khinsider doesn't change albums once they're up, so **an album that is downloaded is done**: later syncs skip it without a request or a look at the disk. |
+| Downloaded albums | The album list marks every album as **Downloaded** or **Partly downloaded** (with the date in its tooltip and window), the filter shows Downloaded / Partly downloaded / Not downloaded, and the top strip counts "12 of 13 albums downloaded". **Check files** in an album's window looks for files you deleted; the next sync downloads those again. |
 | Dates | Each saved file gets the album's "Date Added" (12:00 local time); folders get the date of their newest file. |
 | Renamed albums | When khinsider moves an album to a new address, its tick, Saved as and folder follow it. |
 | Permissions | Downloaded files and new folders get mode **777** by default (setting). |
@@ -129,6 +130,8 @@ Catalog and settings live in `config\` next to `start.bat`; the log is `config\k
   `robots.txt`.
 - Each row gives the album's address (its slug), name, platforms, type and year. New albums get a
   folder name once (see [Folders](#folders)).
+- After a scan that read every page, albums you downloaded that the lists no longer show are looked
+  up once: if khinsider moved one to a new address, its tick and folder follow it.
 - After a scan that read every page, albums the site no longer lists are removed from the catalog
   (your files stay; Clean up lists them). A scan with failed pages removes nothing.
 
@@ -138,10 +141,10 @@ An album's tracks are only known from its own page (`/game-soundtracks/album/<sl
 details (Date Added, formats), the track list with a size for every format, and its images. Pages
 are read:
 
-- the first time you open the album in the list (and with **Read album page** in its window);
+- the first time you open the album in the list (and again whenever you click **Read album page**
+  in its window - the way to pick up tracks khinsider added to an album later);
 - by **Read ticked album pages** in the menu;
-- before every sync, for ticked albums never read and those read longer ago than "Re-read ticked
-  album pages after" (default 7 days; 0 = every sync).
+- before a sync, for ticked albums never read. Pages already read are never read again by a sync.
 
 Sizes in the storage strip only count albums whose pages were read; it says how many aren't yet.
 
@@ -195,8 +198,9 @@ album's window overrides the setting for that album (stored in `album_formats`).
 
 ### Syncing
 
-For every file of the ticked albums (formats as above), `Downloader.plan()` compares the album page
-with the disk and the download record:
+Albums whose files are all downloaded are skipped first (no request, no disk access - khinsider
+doesn't change albums). For every file of the other ticked albums (formats as above),
+`Downloader.plan()` compares the album page with the disk and the download record:
 
 | On disk | Action |
 |---|---|
@@ -262,7 +266,6 @@ Stored in the catalog (`settings` table); changed in the Settings dialog or `POS
 | `track_names` | `site` | `site` (khinsider's file names) or `numbered` (`1-01 - Title.flac`) |
 | `art_folder` | `false` | Images in `<album>/Art/` |
 | `impersonate` | `true` | Look like Chrome (needs curl_cffi) |
-| `album_refresh_days` | `7` | Re-read ticked album pages before a sync when older (0 = every sync) |
 | `parallel` | `auto` | `auto` or a fixed number of parallel downloads |
 | `parallel_max` | `8` | Upper limit for `auto` |
 | `max_rate` | `""` | Overall speed limit, e.g. `10M` (empty = unlimited) |
@@ -271,7 +274,6 @@ Stored in the catalog (`settings` table); changed in the Settings dialog or `POS
 | `sync_every_hours` | `0` | Automatic sync interval (0 = off) |
 | `full_scan_every_days` | `7` | With the schedule on: scan the site when the last scan is older |
 | `resume_interrupted` | `true` | Continue an unfinished sync when the app starts |
-| `check_remote` | `false` | Ask the server about every existing file (one request per file) |
 | `outage_wait_hours` | `12` | How long a sync waits for the site when it's down (0 = don't wait) |
 | `interrupted_job` | `""` | Internal: set while a sync runs |
 
@@ -317,9 +319,10 @@ All JSON; the page uses nothing else.
 |---|---|
 | `GET /api/status?log_since=N` | Version, busy, job, catalog counts, selection totals (`albums`, `unread`, `files`, `bytes`, `synced`, `synced_bytes`), scan / album-page progress, sync progress (incl. `bytes_left`, `eta`, `active`), `leftovers`, next run, new log lines |
 | `GET /api/platforms` | `{platforms: [{slug, name, albums, state}], types: [[type, n]], no_platform, platform_types}` |
-| `GET /api/albums?platform=&q=&type=&show=&sort=&dir=&offset=&limit=` | Albums (`platform` `-` = without platform; `show` `all`/`ticked`/`synced`/`failed`/`unread`; `sort` `name`/`year`/`added`/`new`/`size`/`synced`) -> `{total, albums}` |
+| `GET /api/albums?platform=&q=&type=&show=&sort=&dir=&offset=&limit=` | Albums (`platform` `-` = without platform; `show` `all`/`ticked`/`downloaded`/`partly`/`notdownloaded`/`failed`/`unread`; `sort` `name`/`year`/`added`/`new`/`size`/`synced`) -> `{total, albums}` |
 | `GET /api/album?slug=` | One album, where it is saved (`dir`, `place`), its files with `wanted` and sync state |
 | `POST /api/album/read` `{slug}` | Read that album's page now -> `{read, files, renamed, slug}` |
+| `POST /api/album/check` `{slug}` | Look on disk for that album's downloaded files; missing ones are downloaded by the next sync -> `{slug, missing}` |
 | `POST /api/select` `{key, include}` | Tick/untick: `a:<slug>` or `p:<platform>` |
 | `POST /api/selection/clear` | Untick everything |
 | `POST /api/scan` · `POST /api/read` `{albums?}` · `POST /api/sync` · `POST /api/stop` | Jobs (409 when busy); `read` without albums reads every ticked album's page |

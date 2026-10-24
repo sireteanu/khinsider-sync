@@ -31,7 +31,6 @@ DEFAULT_SETTINGS = {
     "track_names": "site",          # site ("1-01. Title.mp3" as khinsider names it) | numbered ("1-01 - Title.mp3")
     "art_folder": False,            # images in an "Art" folder inside the album's folder
     "impersonate": True,            # requests look like Chrome (needs curl_cffi)
-    "album_refresh_days": 7,        # re-read a ticked album's page before a sync when older (0 = always)
     "parallel": "auto",             # auto | number
     "parallel_max": 8,
     "max_rate": "",                 # "" = unlimited, e.g. "5M"
@@ -39,7 +38,6 @@ DEFAULT_SETTINGS = {
     "file_mode": "777",             # permissions for downloaded files and new folders; "" = system default
     "resume_interrupted": True,     # restart a sync that was cut off (crash, reboot, restart)
     "interrupted_job": "",          # set while a sync runs; cleared when it ends normally
-    "check_remote": False,
     "outage_wait_hours": 12,        # how long a sync waits for the site when it's down
     "sync_every_hours": 0,          # 0 = off
     "full_scan_every_days": 7,      # with the schedule on: full scan when the last one is older
@@ -491,6 +489,33 @@ class Catalog:
                 out += self.db.execute(q, chunk).fetchall()
         return out
 
+    def forget_missing(self, slug: str, exists: Callable[[str], bool]) -> list:
+        """Check an album's saved files on disk: the ones gone are marked not downloaded, so the
+        next sync fetches them again. -> their paths."""
+        words = ",".join("'%s'" % w for w in SYNCED_WORDS)
+        with self.lock:
+            rows = self.db.execute(f"SELECT url, rel FROM files WHERE album=? AND local IN ({words})",
+                                   (slug,)).fetchall()
+        gone = [(u, r) for u, r in rows if not exists(r)]
+        if gone:
+            with self.lock:
+                self.db.executemany("UPDATE files SET local=NULL, local_size=NULL WHERE url=?", [(u,) for u, _ in gone])
+                self.db.commit()
+            self.changed()
+        return [r for _, r in gone]
+
+    def vanished_downloaded(self, scan_id: int) -> list:
+        """Albums a full scan didn't see although something of them was downloaded."""
+        words = ",".join("'%s'" % w for w in SYNCED_WORDS)
+        with self.lock:
+            return [r[0] for r in self.db.execute(
+                f"SELECT DISTINCT a.slug FROM albums a JOIN files f ON f.album=a.slug "
+                f"WHERE (a.seen_scan IS NULL OR a.seen_scan<>?) AND f.local IN ({words})", (scan_id,))]
+
+    def mark_seen(self, slug: str, scan_id: int) -> None:
+        with self.lock:
+            self.db.execute("UPDATE albums SET seen_scan=? WHERE slug=?", (scan_id, slug))
+
     def set_local(self, url: str, word: Optional[str], size: Optional[int], error: Optional[str]) -> None:
         with self.lock:
             self.db.execute("UPDATE files SET local=?, local_size=COALESCE(?, local_size), synced=?, "
@@ -611,35 +636,44 @@ class Catalog:
 
     # ------------------------------------------------------------------ numbers for the page
     def stats(self) -> dict:
-        """{album: {ext or "art": [files, bytes, synced, synced_bytes, failed]}} (cached)."""
+        """{album: {ext or "art": [files, bytes, synced, synced_bytes, failed, last synced]}} (cached)."""
         if self._stats is None:
             words = ",".join("'%s'" % w for w in SYNCED_WORDS)
             out: dict = {}
             with self.lock:
-                for album, ext, kind, n, b, sn, sb, fl in self.db.execute(
+                for album, ext, kind, n, b, sn, sb, fl, last in self.db.execute(
                         # a synced file counts with its real size, the others with the listed one,
                         # so a fully synced selection shows nothing left to download
                         f"SELECT album, ext, kind, COUNT(*), "
                         f"SUM(CASE WHEN local IN ({words}) THEN COALESCE(local_size, bytes) ELSE bytes END), "
                         f"SUM(local IN ({words})), "
                         f"SUM(CASE WHEN local IN ({words}) THEN COALESCE(local_size, bytes) ELSE 0 END), "
-                        f"SUM(error IS NOT NULL AND local IS NULL) FROM files GROUP BY album, ext, kind"):
+                        f"SUM(error IS NOT NULL AND local IS NULL), "
+                        f"MAX(CASE WHEN local IN ({words}) THEN synced END) FROM files GROUP BY album, ext, kind"):
                     key = "art" if kind == "art" else ext
-                    cur = out.setdefault(album, {}).setdefault(key, [0, 0, 0, 0, 0])
+                    cur = out.setdefault(album, {}).setdefault(key, [0, 0, 0, 0, 0, 0.0])
                     for i, v in enumerate((n, b or 0, sn or 0, sb or 0, fl or 0)):
                         cur[i] += v
+                    cur[5] = max(cur[5], last or 0.0)
             self._stats = out
         return self._stats
 
     def album_totals(self, slug: str, formats: list, settings: dict) -> dict:
-        """Files, size and how much is synced of what a sync of this album saves."""
+        """Files, size and how much is synced of what a sync of this album saves. `downloaded`:
+        every one of them is in the download folder (`downloaded_at`: when the last one arrived) -
+        khinsider doesn't change albums, so a downloaded album is never checked again."""
         want = album_wants(settings, slug, formats)
         st = self.stats().get(slug, {})
         t = [0, 0, 0, 0, 0]
+        last = 0.0
         for key in want:
-            for i, v in enumerate(st.get(key, (0, 0, 0, 0, 0))):
-                t[i] += v
-        return {"files": t[0], "bytes": t[1], "synced": t[2], "synced_bytes": t[3], "failed": t[4]}
+            row = st.get(key, (0, 0, 0, 0, 0, 0.0))
+            for i in range(5):
+                t[i] += row[i]
+            last = max(last, row[5])
+        done = bool(t[0]) and t[2] == t[0]
+        return {"files": t[0], "bytes": t[1], "synced": t[2], "synced_bytes": t[3], "failed": t[4],
+                "downloaded": done, "downloaded_at": last if done else None}
 
     def counts(self) -> dict:
         with self.lock:

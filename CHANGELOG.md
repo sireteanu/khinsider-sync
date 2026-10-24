@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.0.2] - 2026-10-24
+
+### Changed
+- Downloaded albums are done: khinsider doesn't change albums, so a sync no longer reads their pages
+  again or looks through their files. Album pages are read once (the first sync or when you open
+  the album). The "Re-read ticked album pages" and "Ask the server about every file" settings are gone.
+
+### New
+- The album list marks albums as Downloaded or Partly downloaded, the filter can show Downloaded /
+  Partly downloaded / Not downloaded albums, and the top strip counts downloaded albums.
+- "Check files" in an album's window finds files you deleted, so the next sync gets them again.
+- An album you downloaded that khinsider moved to a new address keeps its tick and folder after a scan.
+
 ## [1.0.1] - 2026-10-24
 
 ### Changed

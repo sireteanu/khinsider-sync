@@ -23,12 +23,13 @@ log = logging.getLogger("khinsider_sync")
 
 STATIC = os.path.join(os.path.dirname(__file__), "static")
 SORTS = ("name", "year", "added", "new", "size", "synced")
-SHOWS = ("all", "ticked", "synced", "failed", "unread")
+SHOWS = ("all", "ticked", "downloaded", "partly", "notdownloaded", "failed", "unread")
 
 
 def album_json(e: Engine, a: dict, rules: dict, selected: set, settings: dict, names: dict) -> dict:
     t = e.catalog.album_totals(a["slug"], a["formats"], settings) if a["read"] else \
-        {"files": 0, "bytes": 0, "synced": 0, "synced_bytes": 0, "failed": 0}
+        {"files": 0, "bytes": 0, "synced": 0, "synced_bytes": 0, "failed": 0, "downloaded": False,
+         "downloaded_at": None}
     own = rules.get(ALBUM + a["slug"])
     return {"slug": a["slug"], "name": a["name"], "title": a.get("title") or "", "type": a["type"] or "",
             "year": a["year"] or "", "added": a.get("added") or "", "read": a["read"], "error": a["error"],
@@ -127,6 +128,8 @@ def create_app(engine_factory, password: Optional[str] = None, on_restart=None, 
         e = eng()
         if sort not in SORTS:
             raise HTTPException(400, "sort must be one of " + ", ".join(SORTS))
+        if show == "synced":                     # the name before 1.0.2
+            show = "downloaded"
         if show not in SHOWS:
             raise HTTPException(400, "show must be one of " + ", ".join(SHOWS))
         s = e.catalog.settings()
@@ -154,8 +157,12 @@ def create_app(engine_factory, password: Optional[str] = None, on_restart=None, 
             items = [a for a in items if a["slug"] in selected and not a["read"]]
         names = e.catalog.platform_names()
         out = [album_json(e, a, rules, selected, s, names) for a in items]
-        if show == "synced":
-            out = [a for a in out if a["synced"]]
+        if show == "downloaded":
+            out = [a for a in out if a["downloaded"]]
+        elif show == "partly":
+            out = [a for a in out if a["synced"] and not a["downloaded"]]
+        elif show == "notdownloaded":
+            out = [a for a in out if not a["downloaded"]]
         elif show == "failed":
             out = [a for a in out if a["failed"] or a["error"]]
         key = {"name": lambda a: (a["name"].casefold(), a["slug"]),
@@ -210,6 +217,13 @@ def create_app(engine_factory, password: Optional[str] = None, on_restart=None, 
         res = await e.read_album_now(slug)
         new = (res.get("renamed") or {}).get(slug, slug)
         return dict(res, slug=new)
+
+    @app.post("/api/album/check")
+    async def album_check(slug: str = Body(..., embed=True)):
+        try:
+            return eng().check_album(slug)
+        except ValueError as exc:
+            raise HTTPException(404, str(exc))
 
     @app.post("/api/select")
     async def select(key: str = Body(...), include: bool = Body(...)):

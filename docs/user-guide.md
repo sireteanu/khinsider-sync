@@ -27,8 +27,12 @@ is downloaded. Afterwards you see every album, with the platforms on the left.
 - Click an album's name to see its tracks, formats and sizes. The first time you open it, its page
   is read from khinsider (a second or two).
 
-The big line at the top shows how much you ticked and how much of it is already synced. Albums whose
-page hasn't been read yet don't have a size; the next sync reads them.
+The big line at the top shows how much you ticked, how much is downloaded and how many albums are
+done. Albums whose page hasn't been read yet don't have a size; the next sync reads them.
+
+Albums you already have show a **Downloaded** tag in the list (or **Partly downloaded** while a sync
+is still getting them). Pick **Downloaded** or **Not downloaded** in the filter next to the search box
+to see just those.
 
 ## 4. Choose formats and folders (Settings, in the ☰ menu)
 
@@ -58,20 +62,26 @@ stopped, also after a restart or a power cut.
 If khinsider goes down, downloads wait for it and carry on by themselves. If it starts sending web
 pages instead of files (too many downloads), the sync pauses; the next one finishes the job.
 
-## 6. Keep it up to date
+## 6. Downloaded albums are done
+
+khinsider doesn't change albums once they're up, so once an album is downloaded, syncs leave it
+alone - they don't ask khinsider about it or look through its files again. If you deleted some of
+its files by hand, open the album and click **Check files**: the next sync gets the missing ones.
+To pick up tracks khinsider added to an album later, open it and click **Read album page**.
+
+## 7. Keep it up to date
 
 In Settings, set **Sync automatically every N hours** (e.g. 24). Every few days it also scans the
-site, so new albums of your ticked platforms arrive by themselves. Album pages of ticked albums are
-read again after a week (setting), which picks up tracks added to an album.
+site, so new albums of your ticked platforms arrive by themselves.
 
-## 7. Clean up
+## 8. Clean up
 
 After a sync, the Activity panel says if files in your folder aren't part of the sync any more -
 removed from khinsider, in albums you unticked, or formats you no longer sync. Click **Review**, tick
 what should go, and confirm. Only files Khinsider Sync downloaded are ever listed; other music in the
 same folder is left alone.
 
-## 8. Activity log
+## 9. Activity log
 
 **Activity log** (top) lists every file added, updated or deleted, by day, for a year.
 
