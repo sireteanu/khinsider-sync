@@ -116,7 +116,7 @@ function fillAlbum(el, a) {
   el._a = a;
   el.dataset.slug = a.slug;
   $(".n", el).textContent = a.name;
-  const sub = [a.platforms.join(", ") || "No platform", a.type].filter(Boolean).join(" · ");
+  const sub = [a.platforms.join(", ") || "No platform", a.type, a.own_formats && a.own_formats.toUpperCase()].filter(Boolean).join(" · ");
   $(".sub", el).textContent = sub;
   el.title = a.title && a.title !== a.name ? a.title : a.name;
   $(".year", el).textContent = a.year || "";
@@ -288,6 +288,18 @@ function showAlbum(d) {
     refreshList(); loadPlatforms(); poll(true);
   };
   $("#al-site").href = d.page;
+  const fsel = $("#al-formats");
+  const names = { mp3: "MP3", flac: "FLAC where offered", best: "best quality", all: "every format" };
+  fsel.options[0].textContent = `Same as Settings (${names[d.default_formats] || d.default_formats})`;
+  if (d.formats && ![...fsel.options].some((o) => o.value === d.formats)) {
+    const o = document.createElement("option"); o.value = d.formats; o.textContent = d.formats; fsel.append(o);
+  }
+  fsel.value = d.formats || "";
+  fsel.onchange = async () => {
+    try { await api("/api/album-formats", { method: "POST", body: { slug: a.slug, formats: fsel.value } }); }
+    catch (err) { alert("Not saved: " + err.message); }
+    openAlbum(a.slug, false); refreshList(); poll(true);
+  };
   const place = $("#al-place");
   place.value = d.dir;
   place.dataset.orig = d.dir;
@@ -610,6 +622,9 @@ $("#btn-settings").addEventListener("click", async () => {
   form.formats_custom.value = form.formats_mode.value === "custom" ? f : "";
   form.folder_layout.value = s.folder_layout || "album";
   form.album_art.checked = !!s.album_art;
+  form.art_folder.checked = !!s.art_folder;
+  form.track_names.value = s.track_names || "site";
+  form.impersonate.checked = s.impersonate !== false;
   const box = $("#types-list");
   box.innerHTML = "";
   const kinds = plats.types.map(([t]) => t).filter((t) => t !== "Other");
@@ -647,6 +662,9 @@ $("#settings-save").addEventListener("click", async (e) => {
     formats: form.formats_mode.value === "custom" ? form.formats_custom.value : form.formats_mode.value,
     folder_layout: form.folder_layout.value,
     album_art: form.album_art.checked,
+    art_folder: form.art_folder.checked,
+    track_names: form.track_names.value,
+    impersonate: form.impersonate.checked,
     platform_types: [...document.querySelectorAll("#types-list input:checked")].map((i) => i.value),
     album_refresh_days: form.album_refresh_days.value || 0,
     parallel: auto ? "auto" : form.parallel_n.value,

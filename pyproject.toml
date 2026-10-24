@@ -13,6 +13,7 @@ dependencies = [
     "selectolax>=0.3.21",
     "fastapi>=0.110",
     "uvicorn>=0.29",
+    "curl_cffi>=0.7",
 ]
 
 [project.optional-dependencies]

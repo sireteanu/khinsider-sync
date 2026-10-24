@@ -158,6 +158,14 @@
     <button id="al-read" class="btn small" type="button" title="Read the album's page on khinsider again">Read album page</button>
     <a id="al-site" class="btn small ghost" target="_blank" rel="noopener">Open on khinsider</a>
   </div>
+  <label class="field al-formats"><span>Formats for this album</span>
+    <select id="al-formats">
+      <option value="">Same as Settings</option>
+      <option value="mp3">MP3</option>
+      <option value="flac">FLAC where offered, else MP3</option>
+      <option value="best">Best quality offered</option>
+      <option value="all">Every format</option>
+    </select></label>
   <label class="field al-place"><span>Saved as</span>
     <span class="unit"><input id="al-place" spellcheck="false" autocomplete="off"><button id="al-place-save" class="btn small" type="button">Save</button></span>
     <small id="al-place-hint">The album's folder in the download folder. Type another (e.g. Soundtracks/Persona 5) and Save; clear it to go back.</small></label>
@@ -191,7 +199,17 @@
         </select>
         <small>Changing this moves albums you have at the next sync.</small></label>
     </div>
+    <div class="row2">
+      <label class="field"><span>Track names</span>
+        <select name="track_names">
+          <option value="site">As khinsider names them (1-01. Title.mp3)</option>
+          <option value="numbered">Disc and track number (1-01 - Title.mp3)</option>
+        </select>
+        <small>Changing this renames the tracks you have at the next sync.</small></label>
+      <span></span>
+    </div>
     <label class="check"><input type="checkbox" name="album_art"> Also save each album's images (covers, scans)</label>
+    <label class="check"><input type="checkbox" name="art_folder"> Put the images in an Art folder inside the album's folder</label>
     <fieldset class="field types-box"><legend>A ticked platform brings in these album types</legend>
       <div id="types-list" class="types-list"></div>
       <small>None ticked = every type. Albums you tick one by one are always synced.</small></fieldset>
@@ -221,6 +239,7 @@
     </div>
     <label class="check"><input type="checkbox" name="resume_interrupted"> Continue an unfinished sync when the app starts again (after a restart, crash or reboot)</label>
     <label class="check"><input type="checkbox" name="check_remote"> Ask the server about every file I already have (exact, but one request per file)</label>
+    <label class="check"><input type="checkbox" name="impersonate"> Look like Chrome to khinsider (its Cloudflare protection can turn other programs away)</label>
     <p id="settings-error" class="error" hidden></p>
     <div class="dlg-foot"><button class="btn ghost" value="cancel">Cancel</button><button class="btn primary" id="settings-save" value="save">Save settings</button></div>
   </form>

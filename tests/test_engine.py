@@ -249,3 +249,68 @@ def test_sync_reports_its_size_and_what_is_left(site, app_factory):
     sel = st["selection"]
     assert sel["albums"] == 3 and sel["synced"] == sel["files"] and sel["unread"] == 0
     assert sel["synced_bytes"] == sel["bytes"], "nothing is left to download"
+
+
+def test_every_request_names_khinsider_as_referer(site, app_factory):
+    c = app_factory(site)
+    first_sync(c)
+    sent = [h for p, h in site.requests if p.startswith("/soundtracks/") or "/album/" in p]
+    assert sent and all(h.get("Referer") == site.url + "/" for h in sent)
+
+
+def test_requests_look_like_chrome_unless_turned_off(site, app_factory):
+    c = app_factory(site)
+    first_sync(c)
+    ua = {h.get("User-Agent", "") for p, h in site.requests if "/album/" in p or p.startswith("/soundtracks/")}
+    assert ua and all("Chrome/" in u for u in ua), ua
+    assert any("Sec-Ch-Ua" in h for p, h in site.requests if "/album/" in p)
+    c.post("/api/settings", json={"impersonate": False, "album_refresh_days": 0})
+    site.reset_log()
+    sync(c)
+    ua = {h.get("User-Agent", "") for p, h in site.requests}
+    assert ua and all("khinsider-sync/" in u for u in ua), ua
+
+
+def test_numbered_track_names_and_an_art_folder(site, app_factory):
+    c = app_factory(site, settings={"track_names": "numbered", "art_folder": True})
+    scan(c)
+    for slug in (SMW, BIRD, "persona-5"):
+        select(c, "a:" + slug)
+    sync(c)
+    files = on_disk(c.data)
+    assert "Super Mario World/01 - Nintendo Logo.mp3" in files
+    assert "Super Mario World/Art/Cover.jpg" in files
+    assert "A Bird Story/01 - A Bird Story (Piano).mp3" in files, "no # column: the place in the list"
+    assert "A Bird Story/02 - Yesterday - Kan (Reives) Gao.mp3" in files
+    assert "PERSONA5 ORIGINAL SOUNDTRACK/2-01 - Beneath the Mask.mp3" in files
+    assert "PERSONA5 ORIGINAL SOUNDTRACK/Art/Alternate Cover.png" in files
+    # back to khinsider's names: the next sync renames what you have, downloading nothing
+    c.post("/api/settings", json={"track_names": "site", "art_folder": False})
+    site.reset_log()
+    st = sync(c)
+    assert not site.file_requests()
+    files = on_disk(c.data)
+    assert "Super Mario World/01. Nintendo Logo.mp3" in files and "Super Mario World/Cover.jpg" in files
+    assert not (c.data / "Super Mario World" / "Art").exists()
+    assert st["sync"]["failed"] == 0
+
+
+def test_an_album_can_have_its_own_formats(site, app_factory):
+    c = app_factory(site, settings={"album_art": False})
+    scan(c)
+    select(c, "a:" + SMW)
+    select(c, "a:" + BIRD)
+    r = c.post("/api/album-formats", json={"slug": SMW, "formats": "flac"})
+    assert r.status_code == 200 and r.json()["formats"] == "flac"
+    assert c.post("/api/album-formats", json={"slug": SMW, "formats": ".exe"}).status_code == 400
+    sync(c)
+    files = on_disk(c.data)
+    assert "Super Mario World/01. Nintendo Logo.flac" in files and "Super Mario World/01. Nintendo Logo.mp3" not in files
+    assert "A Bird Story/A Bird Story (Piano).mp3" in files
+    d = album(c, SMW)
+    assert d["formats"] == "flac" and d["album"]["own_formats"] == "flac"
+    # back to the general setting: the FLAC files are no longer part of the sync
+    c.post("/api/album-formats", json={"slug": SMW, "formats": ""})
+    sync(c)
+    left = {f["path"]: f["reason"] for f in c.get("/api/cleanup").json()["files"]}
+    assert left.get("Super Mario World/01. Nintendo Logo.flac") == "unticked"

@@ -34,11 +34,15 @@ page hasn't been read yet don't have a size; the next sync reads them.
 
 - **Formats**: MP3 (default), FLAC where offered, best quality, every format, or your own list.
   FLAC is often 3 to 5 times bigger.
-- **Also save each album's images**: covers and scans next to the music.
+- **Track names**: as khinsider names them, or `01 - Title.mp3` / `1-01 - Title.flac` from the
+  album's disc and track numbers.
+- **Also save each album's images**: covers and scans next to the music, or in an `Art` folder.
 - **Folders**: one folder per album, or grouped by platform, type or year.
 - **A ticked platform brings in these album types**: e.g. tick only *Gamerip* so ticking SNES
   doesn't also bring in every arrangement and remix.
 - To put one album somewhere else, open it and change **Saved as** (e.g. `Soundtracks/Persona 5`).
+- To get one album in another format (FLAC for your favourites, say), open it and pick
+  **Formats for this album**.
 
 Changing folders later is safe: the next sync moves what you have; nothing is downloaded twice.
 
@@ -70,6 +74,8 @@ same folder is left alone.
 
 ## Tips
 
+- If khinsider ever starts refusing Khinsider Sync, check that **Look like Chrome** is on in Settings
+  (it is by default).
 - Be gentle with khinsider: keep parallel downloads at the default, and don't tick everything.
 - A password for the page: set `KHINSIDER_PASSWORD` in Docker, or `start.bat --password …`.
 - The ☰ menu also has **Read ticked album pages** (sizes without downloading), **Restart** and

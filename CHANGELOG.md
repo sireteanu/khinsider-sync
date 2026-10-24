@@ -23,3 +23,10 @@
 - Clean up for files no longer part of the sync (only files it downloaded are ever listed),
   Activity log, schedule, resume after restarts, password, dark and light theme.
 - Docker image for Unraid (Compose Manager builds it from GitHub), Windows start.bat.
+- From the khi-explorer downloaders (madLinux7, whxjwksjs): requests look like Chrome (curl_cffi) and
+  name khinsider as Referer, so Cloudflare lets them through; "best quality" uses their order
+  (FLAC, WAV, … M4A, OPUS, OGG, MP3); album art is also found in other galleries, never in comments
+  or other albums.
+- Track names numbered from the disc and track columns (`1-01 - Title.flac`), as a setting.
+- Album images in an Art folder, as a setting.
+- Formats for a single album (e.g. FLAC for favourites), in the album's window.

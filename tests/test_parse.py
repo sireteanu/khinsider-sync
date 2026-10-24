@@ -85,7 +85,9 @@ def test_names_and_sizes():
     ("mp3", [".mp3", ".flac"], {".mp3"}),
     ("flac", [".mp3", ".flac"], {".flac"}),
     ("flac", [".mp3", ".ogg"], {".mp3"}),
-    ("best", [".mp3", ".ogg"], {".mp3"}),
+    ("best", [".mp3", ".ogg"], {".ogg"}),        # khi-explorer's order: OGG before MP3
+    ("best", [".mp3", ".m4a", ".ogg"], {".m4a"}),
+    ("best", [".mp3"], {".mp3"}),
     ("best", [".mp3", ".flac"], {".flac"}),
     ("mp3", [".ogg"], {".ogg"}),                 # nothing left out when an album has no MP3
     ("all", [".mp3", ".flac", ".ogg"], {".mp3", ".flac", ".ogg"}),
@@ -102,3 +104,18 @@ def test_formats_setting_is_checked():
     for bad in ("", ".exe", "everything"):
         with pytest.raises(ValueError):
             parse_formats(bad)
+
+
+def test_album_images_from_any_gallery_but_not_comments_or_other_albums():
+    page = b"""<html><body><div id="pageContent"><h2>X</h2>
+    <p align="left">Platforms: <a href="/game-soundtracks/windows">Windows</a><br>Year: <b>2020</b><br>
+    Date Added: <b>Jan 1st, 2025</b><br>Album type: <b><a href="/game-soundtracks/ost">Soundtrack</a></b></p>
+    <div class="albumImage"><a href="https://cdn.example/s/x/Front.jpg"><img src="https://cdn.example/s/x/thumbs/Front.jpg"></a></div>
+    <div class="albumImage"><img src="https://cdn.example/s/x/Back.webp"></div>
+    <table id="songlist"><tr id="songlist_header"><th></th><th colspan="2">Song Name</th><th>MP3</th></tr>
+    <tr><td></td><td class="clickable-row"><a href="/game-soundtracks/album/x/a.mp3">a</a></td><td>1:00</td><td>1.00 MB</td></tr></table>
+    <div id="comments"><div class="albumImage"><a href="https://cdn.example/avatar.png">me</a></div></div>
+    <div class="useravatar"><img src="https://cdn.example/u.jpg"></div>
+    </div></body></html>"""
+    a = parse.parse_album(page, f"{SITE}/game-soundtracks/album/x")
+    assert a["images"] == ["https://cdn.example/s/x/Front.jpg", "https://cdn.example/s/x/Back.webp"]

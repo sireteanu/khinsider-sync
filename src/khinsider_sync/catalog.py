@@ -16,7 +16,7 @@ import time
 from typing import Callable, Iterable, Optional
 from urllib.parse import unquote, urlsplit
 
-from .core.constants import AUDIO_EXTENSIONS, LOSSLESS
+from .core.constants import AUDIO_EXTENSIONS, BEST_ORDER
 from .core.sync import size_range
 
 SYNCED_WORDS = ("new", "updated", "resumed", "up to date", "already in folder")
@@ -27,6 +27,10 @@ DEFAULT_SETTINGS = {
     "platform_types": [],           # album types a ticked platform brings in ([] = every type)
     "folder_layout": "album",       # album | platform | type | year  (folder above each album)
     "album_places": {},             # {album slug: folder in the download folder} - "Saved as"
+    "album_formats": {},            # {album slug: formats} - this album's own formats setting
+    "track_names": "site",          # site ("1-01. Title.mp3" as khinsider names it) | numbered ("1-01 - Title.mp3")
+    "art_folder": False,            # images in an "Art" folder inside the album's folder
+    "impersonate": True,            # requests look like Chrome (needs curl_cffi)
     "album_refresh_days": 7,        # re-read a ticked album's page before a sync when older (0 = always)
     "parallel": "auto",             # auto | number
     "parallel_max": 8,
@@ -66,7 +70,7 @@ def wanted_exts(setting, album_formats: Iterable[str], art: bool) -> frozenset:
     the album has, plus its images when `art` is on.
       mp3   MP3 (or, when an album has no MP3, its first format, so nothing is left out)
       flac  FLAC (or, without it, MP3 / the first format)
-      best  the first lossless format the album has (FLAC ...), else MP3, else its first format
+      best  the best format the album has: FLAC, WAV, ... M4A, OPUS, OGG, AAC, then MP3
       all   every format the album offers
       ".mp3,.ogg"  exactly these"""
     have = [f for f in album_formats if f]
@@ -78,7 +82,7 @@ def wanted_exts(setting, album_formats: Iterable[str], art: bool) -> frozenset:
         if s == "flac" and ".flac" in have:
             pick = ".flac"
         elif s == "best":
-            pick = next((f for f in LOSSLESS if f in have), None)
+            pick = next((f for f in BEST_ORDER if f in have), None)
         if pick is None:
             pick = ".mp3" if ".mp3" in have else (have[0] if have else None)
         out = {pick} if pick else set()
@@ -88,6 +92,15 @@ def wanted_exts(setting, album_formats: Iterable[str], art: bool) -> frozenset:
     if art:
         out.add("art")
     return frozenset(out)
+
+
+def formats_for(settings: dict, slug: str) -> str:
+    """The formats setting that applies to one album: its own, else the general one."""
+    return (settings.get("album_formats") or {}).get(slug) or settings.get("formats") or "mp3"
+
+
+def album_wants(settings: dict, slug: str, album_formats) -> frozenset:
+    return wanted_exts(formats_for(settings, slug), album_formats, bool(settings.get("album_art")))
 
 
 def parse_formats(text) -> None:
@@ -293,7 +306,7 @@ class Catalog:
             return {s: n for s, n in self.db.execute("SELECT slug, name FROM platforms")}
 
     def album_read(self, slug: str, page: dict, name_of_file: Callable[[str], str],
-                   rel_of: Callable[[dict, str], str]) -> int:
+                   rel_of: Callable[[dict, dict], str]) -> int:
         """Store what an album's page shows (parse.parse_album) -> number of files.
         Files the page no longer lists are dropped from the catalog (Clean up finds them on disk)."""
         now = time.time()
@@ -324,12 +337,16 @@ class Catalog:
                     if not size:
                         continue                      # this track isn't offered in this format
                     name = name_of_file(stem + ext)
+                    f = {"name": name, "kind": "track", "ext": ext, "disc": t["disc"], "num": t["num"],
+                         "title": t["title"], "pos": pos * 100 + k}
                     rows.append((f"{t['page']}#{ext}", slug, t["page"], ext, "track", t["disc"], t["num"], name,
-                                 t["title"], t["duration"], rel_of(album, name), size, size_bytes(size), pos * 100 + k))
+                                 t["title"], t["duration"], rel_of(album, f), size, size_bytes(size), f["pos"]))
             for pos, img in enumerate(page["images"]):
                 name = name_of_file(unquote(urlsplit(img).path.rsplit("/", 1)[-1]))
-                rows.append((img, slug, None, "." + name.rsplit(".", 1)[-1].lower() if "." in name else "",
-                             "art", "", "", name, "", "", rel_of(album, name), None, 0, 100_000_000 + pos))
+                ext = "." + name.rsplit(".", 1)[-1].lower() if "." in name else ""
+                f = {"name": name, "kind": "art", "ext": ext, "disc": "", "num": "", "title": "",
+                     "pos": 100_000_000 + pos}
+                rows.append((img, slug, None, ext, "art", "", "", name, "", "", rel_of(album, f), None, 0, f["pos"]))
             keep = {r[0] for r in rows}
             old = {r[0] for r in self.db.execute("SELECT url FROM files WHERE album=?", (slug,))}
             gone = old - keep
@@ -373,18 +390,20 @@ class Catalog:
             self.db.commit()
         self.changed(albums=True)
 
-    def remap(self, rel_of: Callable[[dict, str], str]) -> int:
-        """Where files go changed (layout or Saved as): work out every file's place again. Files
-        that move are planned afresh by the next sync (a copy already there is adopted by size)."""
+    def remap(self, rel_of: Callable[[dict, dict], str]) -> int:
+        """Where files go changed (layout, names, Art folder or Saved as): work out every file's
+        place again. The next sync moves files it saved before to their new place."""
         with self.lock:
             albums = {r[0]: self._album_dict(r) for r in self.db.execute(
                 f"SELECT {', '.join(self.COLS)} FROM albums WHERE read IS NOT NULL")}
             fixes = []
-            for url, album, name, rel in self.db.execute("SELECT url, album, name, rel FROM files"):
+            for url, album, name, kind, ext, disc, num, title, pos, rel in self.db.execute(
+                    "SELECT url, album, name, kind, ext, disc, num, title, pos, rel FROM files"):
                 a = albums.get(album)
                 if a is None:
                     continue
-                new = rel_of(a, name)
+                new = rel_of(a, {"name": name, "kind": kind, "ext": ext, "disc": disc, "num": num,
+                                 "title": title, "pos": pos})
                 if new != rel:
                     fixes.append((new, url))
             if fixes:
@@ -550,7 +569,7 @@ class Catalog:
 
     def album_totals(self, slug: str, formats: list, settings: dict) -> dict:
         """Files, size and how much is synced of what a sync of this album saves."""
-        want = wanted_exts(settings.get("formats"), formats, bool(settings.get("album_art")))
+        want = album_wants(settings, slug, formats)
         st = self.stats().get(slug, {})
         t = [0, 0, 0, 0, 0]
         for key in want:

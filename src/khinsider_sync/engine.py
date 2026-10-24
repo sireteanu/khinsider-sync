@@ -15,6 +15,7 @@ from urllib.robotparser import RobotFileParser
 
 import httpx
 
+from .core import browser
 from .core.config import Config
 from .core.constants import RETRY_STATUSES
 from .core.download import Downloader, ResolveError, run_item
@@ -23,13 +24,22 @@ from .core.sync import MANIFEST_NAME, FileInfo, Manifest, size_range, stamp_fold
 from .core.util import fmt_bytes, parse_size, safe_segment
 
 from . import __version__, parse
-from .catalog import ALBUM, PLATFORM, Catalog, parse_formats, wanted_exts
+from .catalog import ALBUM, PLATFORM, Catalog, album_wants, parse_formats
 from .scanner import Scanner
 
 log = logging.getLogger("dircrawl")
 USER_AGENT = f"Mozilla/5.0 (compatible; khinsider-sync/{__version__})"
 SITE = "https://downloads.khinsider.com/"
 LAYOUTS = ("album", "platform", "type", "year")
+
+
+def browser_headers(base: str) -> dict:
+    """Headers sent with every request: what a browser sends for a page, and khinsider as the
+    Referer - its download servers expect it (the khi-explorer downloaders send the same)."""
+    return {"User-Agent": USER_AGENT,
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": base}
 
 
 class LogBuffer(logging.Handler):
@@ -61,6 +71,22 @@ def parse_mode(value) -> str:
     if not (len(digits) <= 3 and all(c in "01234567" for c in digits)):
         raise ValueError(f"file permissions must be octal like 777 or 775, not {v!r}")
     return digits.rjust(3, "0")
+
+
+def track_name(f: dict) -> str:
+    """'01 - Title.mp3', or '1-01 - Title.flac' on a multi-disc album (khi-explorer's naming), from
+    the album page's CD and # columns; without a # column the track's place in the list counts.
+    Falls back to khinsider's file name when the track has no title."""
+    title = (f.get("title") or "").strip()
+    if not title:
+        return f["name"]
+    num = (f.get("num") or "").strip().rstrip(".")
+    if not num:
+        num = str((f.get("pos") or 0) // 100 + 1)
+    num = num.zfill(2) if num.isdigit() else num
+    disc = (f.get("disc") or "").strip()
+    number = f"{disc}-{num}" if disc else num
+    return safe_segment(f"{number} - {title}{f['ext']}")
 
 
 def clean_place(value) -> str:
@@ -189,8 +215,14 @@ class Engine:
             self._place_cache = (self.catalog.version, self.catalog.platform_names())
         return self._place_cache[1]
 
-    def rel_of(self, album: dict, name: str) -> str:
-        return f"{self.album_dir(album)}/{name}"
+    def rel_for(self, album: dict, f: dict, settings: Optional[dict] = None) -> str:
+        """Where one file of an album goes, relative to the download folder. `f`: name (khinsider's
+        file name), kind (track | art), ext, disc, num, title, pos (track order)."""
+        s = settings or self.catalog.settings()
+        folder = self.album_dir(album, s)
+        if f["kind"] == "art":
+            return f"{folder}/Art/{f['name']}" if s.get("art_folder") else f"{folder}/{f['name']}"
+        return f"{folder}/{track_name(f) if s.get('track_names') == 'numbered' else f['name']}"
 
     @staticmethod
     def folder_name(name: str, slug: str = "") -> str:
@@ -202,12 +234,11 @@ class Engine:
         a = self.catalog.album(slug)
         if a is not None and not a.get("folder"):
             self.catalog.assign_folders(self.folder_name)
-        return self.catalog.album_read(slug, page, safe_segment,
-                                       lambda album, name: f"{self.album_dir(album, s)}/{name}")
+        return self.catalog.album_read(slug, page, safe_segment, lambda album, f: self.rel_for(album, f, s))
 
     def _remap(self, at_start: bool = False) -> int:
         s = self.catalog.settings()
-        n = self.catalog.remap(lambda album, name: f"{self.album_dir(album, s)}/{name}")
+        n = self.catalog.remap(lambda album, f: self.rel_for(album, f, s))
         if n:
             log.info("%d files now have a different place in the download folder%s", n,
                      "" if at_start else " - the next sync puts them there")
@@ -230,6 +261,23 @@ class Engine:
         moved = self._remap()
         return {"slug": slug, "place": places.get(slug, ""), "dir": self.album_dir(self.catalog.album(slug)),
                 "moved": moved}
+
+    def set_album_formats(self, slug: str, formats) -> dict:
+        """One album's own formats ("" = the general setting)."""
+        a = self.catalog.album(slug)
+        if a is None:
+            raise ValueError("no such album")
+        value = str(formats or "").strip().lower()
+        if value:
+            parse_formats(value)
+        own = dict(self.catalog.settings().get("album_formats") or {})
+        own.pop(slug, None)
+        if value:
+            own[slug] = value
+        self.catalog.save_settings({"album_formats": own})
+        self._sel_cache = None
+        log.info("Formats: %s %s", a["name"], f"uses {value}" if value else "back to the general setting")
+        return {"slug": slug, "formats": value}
 
     def _log_startup(self) -> None:
         """Say which catalog and download folder this start uses and what's in them, so a wrong
@@ -283,15 +331,17 @@ class Engine:
                 continue
             if k == "data_dir" and self.data_locked:
                 continue
-            if k in ("interrupted_job", "album_places"):
+            if k in ("interrupted_job", "album_places", "album_formats"):
                 continue
             if k in ("parallel_max", "sync_every_hours", "full_scan_every_days", "album_refresh_days"):
                 v = max(0, int(float(v or 0)))
             if k == "outage_wait_hours":
                 v = max(0.0, float(v or 0))
                 v = int(v) if v == int(v) else v
-            if k in ("check_remote", "resume_interrupted", "album_art"):
+            if k in ("check_remote", "resume_interrupted", "album_art", "art_folder", "impersonate"):
                 v = bool(v)
+            if k == "track_names" and v not in ("site", "numbered"):
+                raise ValueError("track names must be site or numbered")
             if k == "file_mode":
                 v = parse_mode(v)
             if k in ("max_rate", "min_free") and v:
@@ -313,10 +363,10 @@ class Engine:
                 if not v:
                     raise ValueError("the download folder can't be empty")
             clean[k] = v
-        layout_changed = "folder_layout" in clean and clean["folder_layout"] != s.get("folder_layout")
+        moving = [k for k in ("folder_layout", "track_names", "art_folder") if k in clean and clean[k] != s.get(k)]
         self.catalog.save_settings(clean)
-        if layout_changed:
-            log.info("Folder layout: %s", clean["folder_layout"])
+        if moving:
+            log.info("Changed %s", ", ".join(f"{k.replace('_', ' ')} to {clean[k]}" for k in moving))
             self._remap()
         self._sel_cache = None
         self._schedule_next()
@@ -361,10 +411,15 @@ class Engine:
     def _client(self) -> httpx.AsyncClient:
         http2 = importlib.util.find_spec("h2") is not None
         n = self.scan_workers + int(self.catalog.settings().get("parallel_max") or 8) * 2 + 4
+        transport = browser.make_transport(bool(self.catalog.settings().get("impersonate", True)), n)
+        if transport is not None:
+            # Chrome's own User-Agent and headers go out (curl_cffi); only the Referer is ours
+            return httpx.AsyncClient(transport=transport, follow_redirects=True, max_redirects=8,
+                                     timeout=httpx.Timeout(20.0, connect=10.0), headers={"Referer": self.base})
         return httpx.AsyncClient(http2=http2, follow_redirects=True, max_redirects=8,
                                  timeout=httpx.Timeout(20.0, connect=10.0),
                                  limits=httpx.Limits(max_connections=n, max_keepalive_connections=n),
-                                 headers={"User-Agent": USER_AGENT})
+                                 headers=browser_headers(self.base))
 
     async def _robots(self, client) -> Optional[RobotFileParser]:
         if self.ignore_robots:
@@ -445,7 +500,7 @@ class Engine:
             albums = self.catalog.albums_by_slug(slugs)
         self.scanner = None
         self.job["phase"] = "checking what needs downloading"
-        want = {a: wanted_exts(s["formats"], d["formats"], bool(s["album_art"])) for a, d in albums.items()}
+        want = {a: album_wants(s, a, d["formats"]) for a, d in albums.items()}
         rows = [r for r in self.catalog.files_of(albums)
                 if ("art" if r[4] == "art" else r[3]) in want.get(r[2], ())]
         unread = [a for a in slugs if a in albums and not albums[a]["read"]]

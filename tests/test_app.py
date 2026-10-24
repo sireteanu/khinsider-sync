@@ -166,7 +166,8 @@ def test_settings_validate_and_persist(site, app_factory):
     s = c.get("/api/settings").json()["settings"]
     assert (s["parallel"], s["max_rate"], s["formats"], s["folder_layout"]) == ("4", "5M", "best", "platform")
     assert s["platform_types"] == ["Gamerip", "Soundtrack"] and s["album_refresh_days"] == 3
-    for bad in ({"max_rate": "fast"}, {"formats": ".exe"}, {"folder_layout": "letters"}, {"file_mode": "999"}):
+    for bad in ({"max_rate": "fast"}, {"formats": ".exe"}, {"folder_layout": "letters"}, {"file_mode": "999"},
+                {"track_names": "fancy"}):
         r = c.post("/api/settings", json=bad)
         assert r.status_code == 400 and r.json()["error"]
 

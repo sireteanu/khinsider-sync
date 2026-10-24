@@ -177,7 +177,7 @@ class MockSite:
                 u = up.urlparse(self.path)
                 path = u.path
                 with site._lock:
-                    site.requests.append((self.path, dict(self.headers)))
+                    site.requests.append((self.path, {k.title(): v for k, v in self.headers.items()}))
                     site._count += 1
                     n = site._count
                 if site.down_after is not None and site.completed >= site.down_after and path.startswith("/soundtracks/"):

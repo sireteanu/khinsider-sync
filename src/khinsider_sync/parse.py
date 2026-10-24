@@ -247,8 +247,17 @@ def parse_album(body: bytes, page_url: str) -> dict:
         out["tracks"].append({"page": page, "file": track_file(page), "disc": disc, "num": num,
                               "title": _text(link), "duration": duration, "sizes": sizes})
 
-    for a in content.css(".albumImage a[href]"):
-        href = urljoin(page_url, a.attributes["href"])
+    # the album's own images (covers, scans): full-size links, or the image itself when a gallery
+    # has no link; never the "also viewed" albums, comments or avatars further down the page
+    for sel in ("#viewed_also", ".viewed-also", "#comments", ".comments", ".useravatar"):
+        for n in content.css(sel):
+            n.decompose()
+    for node in content.css(".albumImage a[href], .albumImages a[href], #albumImage a[href], "
+                            ".image-gallery a[href], div.albumImage img[src]"):
+        if node.tag == "img" and node.parent is not None and node.parent.tag == "a":
+            continue                                 # its link (the full size) counts instead
+        raw = node.attributes.get("href") or node.attributes.get("src") or ""
+        href = urljoin(page_url, raw.strip())
         if extension(unquote(urlsplit(href).path)) in IMAGE_EXTENSIONS and href not in out["images"]:
             out["images"].append(href)
     return out

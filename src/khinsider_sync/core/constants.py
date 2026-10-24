@@ -11,7 +11,10 @@ FORMAT_EXT = {
     "OPUS": ".opus", "ALAC": ".m4a", "WMA": ".wma", "APE": ".ape", "WV": ".wv",
 }
 AUDIO_EXTENSIONS = frozenset(FORMAT_EXT.values())
-LOSSLESS = (".flac", ".wav", ".ape", ".wv")          # "best quality" picks the first one an album has
+LOSSLESS = (".flac", ".wav", ".ape", ".wv")
+# "best quality" picks the first of these an album has (the order khi-explorer uses: lossless first,
+# then the formats khinsider usually carries as the original rip, MP3 last)
+BEST_ORDER = (".flac", ".wav", ".ape", ".wv", ".m4a", ".opus", ".ogg", ".aac", ".mp3")
 IMAGE_EXTENSIONS = frozenset({".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"})
 
 # First bytes of a valid file, used to reject error pages saved under an audio or image name.

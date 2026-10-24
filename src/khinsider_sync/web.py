@@ -16,7 +16,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
-from .catalog import ALBUM, PLATFORM, split_platforms
+from .catalog import ALBUM, PLATFORM, album_wants, split_platforms
 from .engine import Engine
 
 log = logging.getLogger("dircrawl")
@@ -35,7 +35,8 @@ def album_json(e: Engine, a: dict, rules: dict, selected: set, settings: dict, n
             "missing": bool(a["missing"]), "formats": a["formats"], "tracks": a.get("tracks"),
             "platforms": [names.get(p, p) for p in a["platforms"]], "platform_slugs": a["platforms"],
             "state": "on" if a["slug"] in selected else "off", "own": own,
-            "via": own is None and a["slug"] in selected, **t}
+            "via": own is None and a["slug"] in selected,
+            "own_formats": (settings.get("album_formats") or {}).get(a["slug"], ""), **t}
 
 
 def create_app(engine_factory, password: Optional[str] = None, on_restart=None, on_shutdown=None) -> FastAPI:
@@ -189,8 +190,7 @@ def create_app(engine_factory, password: Optional[str] = None, on_restart=None, 
                 "FROM files WHERE album=? ORDER BY pos, ext", (slug,)).fetchall()
         keys = ("url", "ext", "kind", "disc", "num", "name", "title", "duration", "rel", "size", "local",
                 "local_size", "error")
-        from .catalog import wanted_exts
-        want = wanted_exts(s["formats"], a["formats"], bool(s["album_art"]))
+        want = album_wants(s, slug, a["formats"])
         files = []
         for r in rows:
             f = dict(zip(keys, r))
@@ -199,6 +199,7 @@ def create_app(engine_factory, password: Optional[str] = None, on_restart=None, 
         places = s.get("album_places") or {}
         return {"album": album_json(e, a, rules, selected, s, e.catalog.platform_names()),
                 "dir": e.album_dir(a, s), "place": places.get(slug, ""), "files": files,
+                "formats": (s.get("album_formats") or {}).get(slug, ""), "default_formats": s.get("formats"),
                 "page": f"{e.base}game-soundtracks/album/{slug}"}
 
     @app.post("/api/album/read")
@@ -277,6 +278,13 @@ def create_app(engine_factory, password: Optional[str] = None, on_restart=None, 
         except RuntimeError:
             return JSONResponse({"error": "Wait until the scan or sync has finished, then try again."},
                                 status_code=409)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+
+    @app.post("/api/album-formats")
+    async def album_formats(body: dict = Body(...)):
+        try:
+            return eng().set_album_formats(body.get("slug") or "", body.get("formats"))
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
 

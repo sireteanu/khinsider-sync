@@ -7,7 +7,11 @@ downloads only what is new, incomplete or changed. Tick single albums, or a whol
 every album khinsider has for it - including albums added later.
 
 It runs as a web page: in Docker (made for Unraid) or on Windows. It is built on the same framework
-as [Rom Sync](https://github.com/sireteanu/rom-sync) and looks and works the same way.
+as [Rom Sync](https://github.com/sireteanu/rom-sync) and looks and works the same way. How it talks
+to khinsider (looking like Chrome, the best-format order, finding album art, numbered track names)
+follows [khi-explorer](https://github.com/madLinux7/khi-explorer) by madLinux7 and
+[its fork](https://github.com/whxjwksjs/khi-explorer-a-khinsider-downloader-tool) by whxjwksjs -
+thanks to both.
 
 - **New here?** Read the [user guide](docs/user-guide.md).
 - **What changed?** See the [changelog](CHANGELOG.md) and the
@@ -44,7 +48,9 @@ modest, don't sync the whole site, and consider [donating](https://downloads.khi
 | Browsing | Platforms on the left with album counts; the album list with search, type filter (Gamerip, Soundtrack, Arrangement …), "Ticked / With synced files / With problems" filters, and sorting by name, year, size or how much is synced. |
 | Selection | Tick an album, or tick a platform for **every album of it, including ones added later** (optionally only some album types, e.g. gamerips). Untick single albums of a ticked platform as exceptions. Ticks are saved immediately. |
 | Album details | Click an album: its tracks per disc with every format and size, its images, what is synced, where it is saved. The album's page is read the first time you open it. |
-| Formats | MP3 (default), FLAC where offered, best quality (lossless where offered), every format, or a list such as `.mp3, .ogg`. Album images (covers, scans) are saved too unless you turn that off. |
+| Formats | MP3 (default), FLAC where offered, best quality (FLAC → WAV → … → M4A → OPUS → OGG → MP3, the first the album has), every format, or a list such as `.mp3, .ogg`. Any album can have **its own formats** (e.g. FLAC for favourites). Album images (covers, scans) are saved too unless you turn that off, optionally in an `Art` folder. |
+| Track names | As khinsider names them (`1-01. Title.mp3`), or numbered from the album page's disc and track columns (`01 - Title.mp3`, `1-01 - Title.flac`). |
+| Getting through | Requests look like Chrome (its TLS fingerprint and headers, via curl_cffi) and name khinsider as the Referer, as khi-explorer does, so Cloudflare's bot protection lets them through. Can be turned off. |
 | Folders | One folder per album, named after the album (clashing names get the type and year added). Optionally grouped by platform, type or year. **Saved as** puts one album anywhere you like. Changing either **moves** what you already have instead of downloading it again. |
 | Sync | Reads the ticked albums' pages (new ones always, others when older than "Re-read after N days"), then downloads only what's missing, half-finished (`.part`, resumed) or changed (its size on the album page differs). Unchanged files cost no request. |
 | Dates | Each saved file gets the album's "Date Added" (12:00 local time); folders get the date of their newest file. |
@@ -155,11 +161,12 @@ Sizes in the storage strip only count albums whose pages were read; it says how 
 |---|---|
 | `mp3` | MP3 (an album without MP3: its first format, so nothing is left out) |
 | `flac` | FLAC where the album has it, else MP3 |
-| `best` | the first lossless format the album has (FLAC, WAV …), else MP3 |
+| `best` | the first of FLAC, WAV, APE, WV, M4A, OPUS, OGG, AAC, MP3 the album has (khi-explorer's order) |
 | `all` | every format the album offers |
 | `.mp3, .ogg` | exactly these, where offered |
 
-Plus the album's images when "Also save each album's images" is on.
+Plus the album's images when "Also save each album's images" is on. **Formats for this album** in an
+album's window overrides the setting for that album (stored in `album_formats`).
 
 ### Folders
 
@@ -170,8 +177,11 @@ Plus the album's images when "Also save each album's images" is on.
   `Type/Album`, `Year/Album`.
 - **Saved as** (album window): any folder inside the download folder for that album, e.g.
   `Soundtracks/Persona 5`; empty = back to its default.
-- File names are the site's (`1-01. Wake Up, Get Up, Get Out There.mp3`), images keep theirs.
-- When a place changes (layout, Saved as, an album renamed on the site), the next sync **moves** the
+- Track names: khinsider's (`1-01. Wake Up, Get Up, Get Out There.mp3`, default), or with
+  "Track names: Disc and track number" `01 - Title.mp3` / `1-01 - Title.flac` built from the album
+  page's CD and # columns (without a # column, the track's place in the list). Images keep their names,
+  next to the music or in `<album>/Art/`.
+- When a place changes (layout, track names, Art folder, Saved as, an album renamed on the site), the next sync **moves** the
   files it saved before to the new place and removes the folders left empty; it doesn't download them
   again.
 
@@ -188,6 +198,9 @@ with the disk and the download record:
 | Matches | **Skip**, no request |
 | Present but not in the record (copied in by hand) | **Adopt** if its size fits, otherwise resume/update |
 
+- Every request looks like Chrome's (curl_cffi impersonating Chrome as an httpx transport,
+  `core/browser.py`) and carries `Referer: https://downloads.khinsider.com/`. Without curl_cffi, or
+  with the setting off, a plain client with browser-like headers is used.
 - Downloading a track takes two requests: its track page (for the download address, which carries a
   per-album token and server name) and the file. The track page is read right before the download
   and kept for the track's other formats. Images are downloaded directly.
@@ -237,6 +250,10 @@ Stored in the catalog (`settings` table); changed in the Settings dialog or `POS
 | `platform_types` | `[]` | Album types a ticked platform brings in (`[]` = all) |
 | `folder_layout` | `album` | `album`, `platform`, `type` or `year` |
 | `album_places` | `{}` | Saved as: `{album slug: folder}`; changed only with `POST /api/album-place` |
+| `album_formats` | `{}` | Formats for single albums: `{album slug: formats}`; changed only with `POST /api/album-formats` |
+| `track_names` | `site` | `site` (khinsider's file names) or `numbered` (`1-01 - Title.flac`) |
+| `art_folder` | `false` | Images in `<album>/Art/` |
+| `impersonate` | `true` | Look like Chrome (needs curl_cffi) |
 | `album_refresh_days` | `7` | Re-read ticked album pages before a sync when older (0 = every sync) |
 | `parallel` | `auto` | `auto` or a fixed number of parallel downloads |
 | `parallel_max` | `8` | Upper limit for `auto` |
@@ -299,6 +316,7 @@ All JSON; the page uses nothing else.
 | `POST /api/selection/clear` | Untick everything |
 | `POST /api/scan` · `POST /api/read` `{albums?}` · `POST /api/sync` · `POST /api/stop` | Jobs (409 when busy); `read` without albums reads every ticked album's page |
 | `GET/POST /api/settings` | Read / change settings (400 with a message on invalid values) |
+| `POST /api/album-formats` `{slug, formats}` | This album's own formats (`""` = the general setting); 400 on an unknown format |
 | `POST /api/album-place` `{slug, place}` | Saved as (`""` = default) -> `{slug, place, dir, moved}`; 400 on a bad place, 409 while busy |
 | `GET /api/history` | Last jobs |
 | `GET /api/sync/files?kind=` | Files behind an Activity counter (`new`, `updated`, `resumed`, `uptodate`, `failed`) |
@@ -323,6 +341,7 @@ src/khinsider_sync/
   cleanup.py    Clean up: walk the download folder, judge files, delete confirmed ones
   static/       index.html, app.css, app.js - no build step, no CDN
   core/         the sync engine from Rom Sync (download.py with the `resolve` hook, sync.py, limits.py ...)
+    browser.py  ChromeTransport: httpx transport that sends requests through curl_cffi as Chrome
 tests/          pytest against tests/mock_site.py (a copy of khinsider's markup; samples of the real
                 pages in tests/fixtures); never the real site
 docker/, unraid/, .github/workflows/ (tests, release, docker image), start.bat, run.py, publish.bat
@@ -334,7 +353,7 @@ docker/, unraid/, .github/workflows/ (tests, release, docker image), start.bat, 
 
 ```
 pip install -e ".[dev]"
-python -m pytest            # ~75 tests, ~1.5 min, all against the in-process mock site
+python -m pytest            # ~80 tests, ~1.5 min, all against the in-process mock site
 python -m pyflakes src tests
 python run.py --data downloads --config config
 ```

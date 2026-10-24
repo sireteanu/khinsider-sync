@@ -5,7 +5,8 @@ site's album lists into a catalog, shows every album with a platform list on the
 ticked albums (and whole ticked platforms, including albums added later), and cleans up files that
 aren't part of the sync any more. Built on the Rom Sync framework (sireteanu/rom-sync): `core/` is
 its sync engine (downloader, manifest, parallel-download gate, outage handling) with one addition,
-the download-address resolver. Python 3.9+, async (httpx), FastAPI.
+the download-address resolver, and `core/browser.py` (requests look like Chrome through curl_cffi,
+learned from the khi-explorer downloaders by madLinux7 and whxjwksjs). Python 3.9+, async (httpx), FastAPI.
 It runs on **Windows** (`start.bat`) and in **Docker on Unraid** - keep both working: Windows paths
 and console, and PUID/PGID/UMASK plus `/config` and `/data` in Docker.
 
@@ -35,7 +36,9 @@ src/khinsider_sync/
     download.py Downloader: plan() + download(); `resolve` hook (ResolveError); run_item()
     sync.py     FileInfo, Manifest (<data>/.khinsider-sync.db, by_url()/move()), plan()
     limits.py   Limiter (page pacing), DownloadGate (auto parallel downloads), RateLimit
-    util.py / constants.py (formats, MAGIC) / config.py
+    browser.py  ChromeTransport (httpx transport over curl_cffi impersonating Chrome; maps curl errors
+                to httpx exceptions, drops content-encoding because curl already decoded)
+    util.py / constants.py (formats, BEST_ORDER, MAGIC) / config.py
 tests/  conftest (app_factory + API helpers), mock_site, fixtures/ (real markup samples),
         test_parse, test_app, test_engine, test_cleanup, test_changes, test_outage
 ```
@@ -69,7 +72,10 @@ tests/  conftest (app_factory + API helpers), mock_site, fixtures/ (real markup 
 3. **Album folders** (`albums.folder`) are assigned once (`assign_folders`): the name, then
    "name (Type, Year)", then "name [slug]" on a clash - never changed afterwards, so new albums never
    move old ones. `engine.album_dir()` = Saved as (`album_places`) or layout folder
-   (`folder_layout`: album | platform | type | year) + folder. File names come from the site.
+   (`folder_layout`: album | platform | type | year) + folder. `Engine.rel_for()` names each file:
+   khinsider's name, or `track_name()` ("1-01 - Title.flac") with `track_names: numbered`; images
+   go in `Art/` with `art_folder`. Per-album formats: `album_formats` via `catalog.album_wants()` -
+   use it wherever a sync decides what to save (engine, cleanup, web).
 4. **Moving, not re-downloading**: when an album's place changes (layout, Saved as, a renamed
    album), the next sync moves files the manifest says it saved (`Engine._relocate`,
    `Manifest.by_url/move`) and removes the folders left empty.
@@ -81,7 +87,10 @@ tests/  conftest (app_factory + API helpers), mock_site, fixtures/ (real markup 
    the same folder is never listed. "gone" needs the album page read without errors (or the album
    gone after a finished full scan). Nothing is deleted without `confirm: true`; refused while busy.
 7. A full scan that had failed pages removes nothing (status "incomplete").
-8. Politeness: page reads 4 at a time with pacing (`Limiter`), downloads start at 2 parallel and
+8. **Getting through**: with `impersonate` (default) the client uses `browser.ChromeTransport` and only
+   adds `Referer`; otherwise `browser_headers()` (browser-like Accept headers + Referer). Every
+   request names khinsider as Referer - its download servers expect it.
+9. Politeness: page reads 4 at a time with pacing (`Limiter`), downloads start at 2 parallel and
    ramp; respect robots.txt (it only disallows /unavailable).
 
 ## Publishing (GitHub: sireteanu/khinsider-sync)
@@ -95,7 +104,8 @@ tests/  conftest (app_factory + API helpers), mock_site, fixtures/ (real markup 
   CHANGELOG.md.
 
 ## Conventions
-- Dependencies: httpx[http2], selectolax, fastapi, uvicorn (+ pytest/pyflakes). Ask before adding more.
+- Dependencies: httpx[http2], selectolax, fastapi, uvicorn, curl_cffi (+ pytest/pyflakes). Ask before adding more.
+  The app must keep working without curl_cffi (plain httpx, a warning in the log).
 - Log through `logging.getLogger("dircrawl")`. Never `print`.
 - Every user-visible change gets a test against `MockSite`. **MockSite copies the live markup**; when
   the site changes, update `tests/fixtures/` from the real page first (browser), then the mock and

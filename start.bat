@@ -11,7 +11,7 @@ if not exist ".venv\Scripts\python.exe" (
   echo First start: setting things up, this takes a minute...
   %PY% -m venv .venv || goto :nopython
 )
-".venv\Scripts\python.exe" -c "import khinsider_sync, fastapi, uvicorn, httpx, selectolax" >nul 2>nul
+".venv\Scripts\python.exe" -c "import khinsider_sync, fastapi, uvicorn, httpx, selectolax, curl_cffi" >nul 2>nul
 if errorlevel 1 (
   echo Installing what Khinsider Sync needs...
   ".venv\Scripts\python.exe" -m pip install --disable-pip-version-check -q -e . || goto :failed

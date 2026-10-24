@@ -21,7 +21,7 @@ import sqlite3
 
 from .core.sync import MANIFEST_NAME, Manifest
 from .core.util import fmt_bytes, fs_path
-from .catalog import wanted_exts
+from .catalog import album_wants
 
 log = logging.getLogger("dircrawl")
 
@@ -99,8 +99,7 @@ def find(engine, settings: dict, disk: list) -> list:
             return False
         if album not in want_cache:
             a = albums.get(album)
-            want_cache[album] = wanted_exts(settings.get("formats"), a["formats"] if a else [],
-                                            bool(settings.get("album_art")))
+            want_cache[album] = album_wants(settings, album, a["formats"] if a else [])
         return ("art" if kind == "art" else ext) in want_cache[album]
 
     def judged_gone(d: str) -> bool:
