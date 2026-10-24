@@ -11,7 +11,6 @@ FORMAT_EXT = {
     "OPUS": ".opus", "ALAC": ".m4a", "WMA": ".wma", "APE": ".ape", "WV": ".wv",
 }
 AUDIO_EXTENSIONS = frozenset(FORMAT_EXT.values())
-LOSSLESS = (".flac", ".wav", ".ape", ".wv")
 # "best quality" picks the first of these an album has (the order khi-explorer uses: lossless first,
 # then the formats khinsider usually carries as the original rip, MP3 last)
 BEST_ORDER = (".flac", ".wav", ".ape", ".wv", ".m4a", ".opus", ".ogg", ".aac", ".mp3")
@@ -35,7 +34,7 @@ MAX_BODY = 25_000_000
 CHUNK = 256 * 1024
 DEFAULT_UA = f"Mozilla/5.0 (compatible; khinsider-sync/{__version__})"
 
-_EXT_RE = re.compile(r"(\.[a-z0-9]{1,10})(?:\.\d{1,3})?$")      # ".mp3", also ".7z.001"
+_EXT_RE = re.compile(r"(\.[a-z0-9]{1,10})$")                   # ".mp3", ".flac", ".jpg"
 _BAD_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 _RESERVED = frozenset({"con", "prn", "aux", "nul", *(f"com{i}" for i in range(1, 10)),
                        *(f"lpt{i}" for i in range(1, 10))})

@@ -18,12 +18,11 @@ from dataclasses import dataclass
 from email.utils import formatdate, parsedate_to_datetime
 from typing import Optional
 
-log = logging.getLogger("dircrawl")
+log = logging.getLogger("khinsider_sync")
 _stamp_warned = False
 
 MANIFEST_NAME = ".khinsider-sync.db"
 
-_DATE_RE = re.compile(r"(?<!\d)(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?(?!\d)")
 _SIZE_RE = re.compile(r"^\s*(\d+(?:[.,]\d+)?)\s*(b|bytes?|k|m|g|t|kb|mb|gb|tb|kib|mib|gib|tib)\s*$", re.I)
 _UNITS = {"": 0, "b": 0, "byte": 0, "bytes": 0, "k": 1, "kb": 1, "kib": 1, "m": 2, "mb": 2, "mib": 2,
           "g": 3, "gb": 3, "gib": 3, "t": 4, "tb": 4, "tib": 4}
@@ -35,42 +34,15 @@ FETCH_ACTIONS = (NEW, RESUME, UPDATE, CHECK)
 
 @dataclass(frozen=True)
 class FileInfo:
-    """What the listing page says about one file."""
+    """What the album page says about one file."""
     ext: str
-    date: Optional[str] = None      # normalised listing date, e.g. "2025-11-17" or "2025-11-17 08:30"
-    size: Optional[str] = None      # listing size text, e.g. "3.54 KB"
+    date: Optional[str] = None      # the album's Date Added, e.g. "2025-11-17"
+    size: Optional[str] = None      # the size shown for this file, e.g. "5.64 MB" (None for images)
 
 
-# --------------------------------------------------------------------------- listing values
-def parse_date(text: str) -> Optional[str]:
-    m = _DATE_RE.search(text or "")
-    if not m:
-        return None
-    y, mo, d, hh, mm, ss = m.groups()
-    out = f"{y}-{mo}-{d}"
-    if hh:
-        out += f" {hh}:{mm}" + (f":{ss}" if ss else "")
-    return out
-
-
-def is_size(text: str) -> bool:
-    return bool(_SIZE_RE.match(text or ""))
-
-
-_SIZE_SEARCH = re.compile(r"(?<![\w.,])(\d+(?:[.,]\d+)?)\s?(bytes?|b|kib|mib|gib|tib|kb|mb|gb|tb|k|m|g|t)(?![\w])", re.I)
-
-
-def find_size(text: str) -> Optional[str]:
-    """First size in a piece of listing text: '2025-11-17 • 3.54 KB' -> '3.54 KB'."""
-    for m in _SIZE_SEARCH.finditer(text or ""):
-        unit = m.group(2)
-        if unit.lower() in ("b", "byte", "bytes") or len(unit) > 1 or "." in m.group(1) or "," in m.group(1):
-            return f"{m.group(1)} {unit}"
-    return None
-
-
+# --------------------------------------------------------------------------- sizes and dates
 def size_range(text: str) -> Optional[tuple]:
-    """Byte range a rounded listing size can stand for ("1.50 KB" -> (1531, 1541)).
+    """Byte range a rounded size can stand for ("5.64 MB" -> about 5.63 to 5.65 MiB).
     Units may be 1000- or 1024-based; both are accepted."""
     m = _SIZE_RE.match(text or "")
     if not m:
@@ -95,7 +67,7 @@ def size_matches(local: int, text: Optional[str]) -> Optional[bool]:
 
 
 def date_epoch(date: str) -> float:
-    """Listing date as a UTC timestamp (start of the day when no time is shown)."""
+    """A page date as a UTC timestamp (start of the day when no time is shown)."""
     fmt = "%Y-%m-%d %H:%M:%S" if date.count(":") == 2 else "%Y-%m-%d %H:%M" if ":" in date else "%Y-%m-%d"
     return float(calendar.timegm(time.strptime(date, fmt)))
 
@@ -103,7 +75,7 @@ def date_epoch(date: str) -> float:
 def site_timestamp(info: "FileInfo", last_modified: Optional[str] = None) -> Optional[float]:
     """The date to give a saved file so it matches what the website shows.
 
-    The listing's date is the source of truth. The server's Last-Modified is only used when it
+    The album's date is the source of truth. The server's Last-Modified is only used when it
     falls on that same day (it adds the time of day). A date without a time becomes 12:00 local
     time, so Explorer / Finder show the same day as the website in any time zone."""
     lm = http_date_epoch(last_modified)
@@ -191,8 +163,8 @@ class Record:
     size: Optional[int]
     last_modified: Optional[str]
     etag: Optional[str]
-    listing_date: Optional[str]
-    listing_size: Optional[str]
+    page_date: Optional[str]
+    page_size: Optional[str]
     part_validator: Optional[str]     # Last-Modified / ETag of an unfinished .part, for If-Range
 
 
@@ -209,11 +181,15 @@ class Manifest:
             PRAGMA synchronous=NORMAL;
             CREATE TABLE IF NOT EXISTS files (
                 path TEXT PRIMARY KEY, url TEXT, size INTEGER, last_modified TEXT, etag TEXT,
-                listing_date TEXT, listing_size TEXT, part_validator TEXT, updated REAL);
+                page_date TEXT, page_size TEXT, part_validator TEXT, updated REAL);
             CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT);
         """)
+        cols = {r[1] for r in self.db.execute("PRAGMA table_info(files)")}
+        for old, new in (("listing_date", "page_date"), ("listing_size", "page_size")):
+            if old in cols:                      # a download record from 1.0.0
+                self.db.execute(f"ALTER TABLE files RENAME COLUMN {old} TO {new}")
         self.rows = {r[0]: Record(*r) for r in self.db.execute(
-            "SELECT path, url, size, last_modified, etag, listing_date, listing_size, part_validator "
+            "SELECT path, url, size, last_modified, etag, page_date, page_size, part_validator "
             "FROM files")}
 
     def get(self, path: str) -> Optional[Record]:
@@ -222,8 +198,8 @@ class Manifest:
     def _save(self, rec: Record) -> None:
         self.rows[rec.path] = rec
         self.db.execute("INSERT OR REPLACE INTO files VALUES (?,?,?,?,?,?,?,?,?)",
-                        (rec.path, rec.url, rec.size, rec.last_modified, rec.etag, rec.listing_date,
-                         rec.listing_size, rec.part_validator, time.time()))
+                        (rec.path, rec.url, rec.size, rec.last_modified, rec.etag, rec.page_date,
+                         rec.page_size, rec.part_validator, time.time()))
 
     def done(self, path, url, size, last_modified, etag, info: FileInfo) -> None:
         self._save(Record(path, url, size, last_modified, etag, info.date, info.size, None))
@@ -231,15 +207,15 @@ class Manifest:
     def part_started(self, path, url, validator: Optional[str]) -> None:
         old = self.rows.get(path)
         rec = Record(path, url, old.size if old else None, old.last_modified if old else None,
-                     old.etag if old else None, old.listing_date if old else None,
-                     old.listing_size if old else None, validator)
+                     old.etag if old else None, old.page_date if old else None,
+                     old.page_size if old else None, validator)
         self._save(rec)
 
     def seen_unchanged(self, path, info: FileInfo) -> None:
-        """Server said 304 / listing confirmed: refresh what the listing shows now."""
+        """Server said 304 / page confirmed: remember what the album page shows now."""
         old = self.rows.get(path)
-        if old and (old.listing_date != info.date or old.listing_size != info.size):
-            old.listing_date, old.listing_size = info.date, info.size
+        if old and (old.page_date != info.date or old.page_size != info.size):
+            old.page_date, old.page_size = info.date, info.size
             self._save(old)
 
     def by_url(self) -> dict:
@@ -300,13 +276,13 @@ def plan(dest: str, rec: Optional[Record], info: FileInfo, *, check_remote: bool
 
     if rec is not None:                                  # we downloaded it before
         if rec.size is not None and size != rec.size:
-            if size < rec.size and info.date == rec.listing_date and info.size == rec.listing_size:
+            if size < rec.size and info.date == rec.page_date and info.size == rec.page_size:
                 return RESUME, f"incomplete ({size} of {rec.size} bytes)"
             return UPDATE, "local copy differs from what was downloaded"
-        if info.date and rec.listing_date and info.date != rec.listing_date:
-            return UPDATE, f"changed on the site ({rec.listing_date} -> {info.date})"
-        if info.size and rec.listing_size and info.size != rec.listing_size:
-            return UPDATE, f"size changed on the site ({rec.listing_size} -> {info.size})"
+        if info.date and rec.page_date and info.date != rec.page_date:
+            return UPDATE, f"changed on the site ({rec.page_date} -> {info.date})"
+        if info.size and rec.page_size and info.size != rec.page_size:
+            return UPDATE, f"size changed on the site ({rec.page_size} -> {info.size})"
         if info.size and size_matches(size, info.size) is False:
             return UPDATE, f"size on the site is {info.size}"
         if check_remote or (not info.date and not info.size and (rec.last_modified or rec.etag)):

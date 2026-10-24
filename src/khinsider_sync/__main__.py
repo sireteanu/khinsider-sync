@@ -90,7 +90,7 @@ def main(argv=None) -> int:
         log_file = None
     for noisy in ("httpx", "httpcore", "uvicorn.access"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
-    logging.getLogger("dircrawl").propagate = True
+    logging.getLogger("khinsider_sync").propagate = True
 
     data_dir = os.path.abspath(args.data)
     restart = {"wanted": False}

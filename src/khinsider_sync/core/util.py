@@ -8,14 +8,10 @@ import re
 from .constants import _BAD_CHARS, _EXT_RE, _RESERVED
 
 def extension(text: str) -> str:
-    """'.7z' for 'Atari/5200/Game (USA).7z' (or '...7z.001'); '' when there is none."""
+    """'.flac' for 'Persona 5/1-01. Wake Up.flac'; '' when there is none."""
     tail = text.lower().rstrip("/").rsplit("/", 1)[-1]
     m = _EXT_RE.search(tail)
     return m.group(1) if m else ""
-
-
-def _fold(value: str) -> str:
-    return value.casefold().strip().rstrip("/")
 
 
 def safe_segment(name: str) -> str:

@@ -345,3 +345,18 @@ def test_first_of_a_list_skips_albums_without_any_of_it(site, app_factory):
     assert not any(f.endswith((".mp3", ".ogg")) for f in files)
     assert files & {"A Bird Story/cover.jpg"}, "its images are still on the list"
     assert st["sync"]["failed"] == 0
+
+
+def test_a_download_record_from_1_0_0_is_taken_over(tmp_path):
+    import sqlite3
+    from khinsider_sync.core.sync import MANIFEST_NAME, Manifest
+    db = sqlite3.connect(tmp_path / MANIFEST_NAME)
+    db.execute("CREATE TABLE files (path TEXT PRIMARY KEY, url TEXT, size INTEGER, last_modified TEXT, etag TEXT, "
+               "listing_date TEXT, listing_size TEXT, part_validator TEXT, updated REAL)")
+    db.execute("INSERT INTO files VALUES ('A/x.mp3', 'u', 5, NULL, NULL, '2025-01-01', '0.01 MB', NULL, 0)")
+    db.commit()
+    db.close()
+    m = Manifest(str(tmp_path))
+    rec = m.get("A/x.mp3")
+    assert rec.page_date == "2025-01-01" and rec.page_size == "0.01 MB"
+    m.close()

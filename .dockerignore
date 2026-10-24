@@ -1,9 +1,10 @@
 .git
+.github
+.claude
 .venv
 **/__pycache__
+.pytest_cache
 config
 downloads
 tests
-*.state.db*
-directories*
-crawl-results
+docs

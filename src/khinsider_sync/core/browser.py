@@ -12,7 +12,7 @@ from typing import Optional
 
 import httpx
 
-log = logging.getLogger("dircrawl")
+log = logging.getLogger("khinsider_sync")
 
 try:                                           # optional: without it, plain httpx is used
     from curl_cffi.requests import AsyncSession
@@ -24,10 +24,6 @@ except ImportError:                            # pragma: no cover - depends on t
 IMPERSONATE = "chrome"
 # headers httpx adds by itself; curl_cffi sends Chrome's own instead
 _DROP = {"host", "connection", "content-length", "accept-encoding", "transfer-encoding"}
-
-
-def available() -> bool:
-    return AsyncSession is not None
 
 
 def _map_error(e: Exception, request: httpx.Request) -> httpx.HTTPError:

@@ -100,79 +100,18 @@ h2 { font-size: 15px; font-weight: 600; }
   border: 1px solid var(--line); background: var(--field); color: var(--ink);
 }
 
-/* columns shared by header and rows */
-.cols, .row { display: grid; align-items: center; gap: 8px; }
-.cols { padding: 6px 12px; font-size: 12px; color: var(--ink-2); border-bottom: 1px solid var(--line); }
-.cols .c-name { padding-left: 50px; }
+/* ---------- album list cells ---------- */
 .c-num, .c-date { text-align: right; }
-.cols .c-meter { padding-left: 4px; }
-.cols .sort {
-  font: inherit; color: inherit; background: none; border: 0; padding-top: 2px; padding-bottom: 2px;
-  cursor: pointer; border-radius: 3px; white-space: nowrap; width: 100%;
-}
-.cols .sort.c-num, .cols .sort.c-date { text-align: right; }
-.cols .sort.c-name, .cols .sort.c-meter { text-align: left; }
-.cols .sort:hover { color: var(--ink); }
-.cols .sort:focus-visible { outline: 2px solid var(--grape-ink); outline-offset: 1px; }
-.cols .sort.asc, .cols .sort.desc { color: var(--ink); font-weight: 600; }
-.cols .sort::after { display: inline-block; width: 1em; text-align: center; content: ""; }
-.cols .sort.asc::after { content: "\25B2"; font-size: 9px; }
-.cols .sort.desc::after { content: "\25BC"; font-size: 9px; }
-
-/* ---------- tree ---------- */
-.tree { max-height: calc(100vh - 290px); min-height: 300px; overflow: auto; padding: 4px 0 12px; }
-.row { padding: 3px 12px 3px calc(12px + var(--depth, 0) * 18px); border-radius: 0; }
-.row:hover { background: var(--grape-soft); }
-.row .name-wrap { display: flex; }
-.twisty {
-  width: 20px; height: 20px; border: 0; background: none; color: var(--ink-2); cursor: pointer; padding: 0;
-  display: inline-grid; place-items: center; flex: none;
-}
-.twisty::before { content: ""; border: 5px solid transparent; border-left: 6px solid currentColor; margin-left: 4px; transition: transform .15s; }
-.node.open > .row .twisty::before { transform: rotate(90deg); transform-origin: 3px 5px; }
-.twisty.leaf { visibility: hidden; }
-.row { grid-template-columns: 20px 20px minmax(0, 1fr) minmax(150px, 0.8fr) 70px 82px 92px 120px 30px; }
-.cols { grid-template-columns: minmax(0, 1fr) minmax(150px, 0.8fr) 70px 82px 92px 120px 30px; }
-@media (max-width: 640px) {
-  .row { grid-template-columns: 20px 20px minmax(0, 1fr) 76px 30px; }
-  .cols { grid-template-columns: minmax(0, 1fr) 76px 30px; }
-  .c-as { display: none !important; }
-  .cols .c-files, .cols .c-date, .cols .c-meter, .row .files, .row .date, .row .c-meter { display: none; }
-}
 .tick { width: 16px; height: 16px; margin: 0; accent-color: var(--grape-ink); cursor: pointer; }
-.name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
-.name .path { color: var(--ink-2); font-size: 12px; margin-left: 6px; }
-.node.err > .row .name { color: var(--red); }
-.node.sel > .row .name { font-weight: 600; }
 .meter { display: inline-block; width: 70px; height: 7px; background: var(--field); border-radius: 2px; overflow: hidden; vertical-align: middle; }
 .meter .fill { display: block; height: 100%; width: 0; background: var(--teal); }
 .pct { font-size: 12px; color: var(--ink-2); margin-left: 6px; }
 .c-meter.has-failed .pct { color: var(--red); }
-.c-as { display: flex; align-items: center; gap: 4px; min-width: 0; padding-right: 8px; }
-.cols .c-as { font-size: 12px; font-weight: 600; color: var(--ink-2); padding-left: 8px; }
-.as { flex: 1; min-width: 0; padding: 2px 6px; font: inherit; font-size: 12.5px; color: var(--ink-2);
-  background: transparent; border: 1px solid transparent; border-radius: var(--radius-s); text-overflow: ellipsis; }
-.row:hover .as, .as:focus { border-color: var(--line); background: var(--field); color: var(--ink); }
-.as:focus { outline: 2px solid var(--grape-ink); outline-offset: -1px; }
-.as.renamed { color: var(--teal); font-weight: 600; }
-.as.moved { font-style: italic; }
-.as.saving { opacity: .5; }
-.romm-tag { flex: none; max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-size: 11px; color: var(--teal); border: 1px solid var(--teal); border-radius: 9px; padding: 0 6px; opacity: .85; }
-.romm-tag[hidden] { display: none; }
-.nodate { flex: none; border: 1px solid var(--line); background: none; color: var(--ink-2); cursor: pointer;
-  font-size: 11px; padding: 1px 5px; border-radius: var(--radius-s); opacity: 0; }
-.row:hover .nodate, .nodate:focus-visible { opacity: 1; }
-.nodate:hover { color: var(--grape-ink); border-color: var(--grape-ink); }
-.nodate[hidden] { display: none; }
-.row:hover .node.own-files .c-as > * { visibility: hidden; }
-.hint { color: var(--ink-2); font-size: 13px; margin: 0 0 12px; }
-.hint code { background: var(--field); padding: 1px 4px; border-radius: 3px; }
 .info { border: 0; background: none; color: var(--ink-2); cursor: pointer; padding: 4px; border-radius: var(--radius-s); }
 .info svg { width: 16px; height: 16px; stroke: currentColor; stroke-width: 2; fill: none; }
 .info:hover { color: var(--grape-ink); }
 .info[hidden] { display: none; }
-.loading { padding: 6px 12px 6px calc(52px + var(--depth, 0) * 18px); color: var(--ink-2); font-size: 12.5px; }
+.loading { padding: 6px 12px; color: var(--ink-2); font-size: 12.5px; }
 
 .empty { padding: 40px 32px; max-width: 560px; }
 .empty h2 { font-size: 22px; margin-bottom: 8px; }
@@ -270,18 +209,11 @@ table.files td:nth-child(2), table.files td:nth-child(3) { white-space: nowrap; 
 .menu button.danger b { color: var(--red); }
 #shutdown[hidden] { display: none; }
 
-
-/* "Files in this folder" row */
-.node.own-files > .row .name { font-style: italic; color: var(--ink-2); }
-.node.own-files.sel > .row .name { color: var(--ink); }
-
-
-
-/* ---------- phones / narrow windows: Activity, Log and Downloading follow the folder tree ---------- */
+/* ---------- phones / narrow windows: Activity, Log and Downloading follow the album list ---------- */
 @media (max-width: 980px) {
-  .activity { position: static; }               /* not sticky once it's below the tree */
+  .activity { position: static; }               /* not sticky once it's below the list */
   .browser { min-height: 0; }
-  .tree { max-height: 65vh; }                   /* keeps the Activity panels a short scroll away */
+  .alist { max-height: 65vh; }                  /* keeps the Activity panels a short scroll away */
 }
 
 /* Clean up */
@@ -370,8 +302,10 @@ table.files td.n { white-space: nowrap; text-align: right; }
 .acols, .arow { display: grid; grid-template-columns: 20px minmax(0, 1fr) 52px 82px 120px 30px; gap: 8px; align-items: center; }
 .acols { padding: 6px 12px; font-size: 12px; color: var(--ink-2); border-bottom: 1px solid var(--line); }
 .acols .sort {
-  border: 0; background: none; color: inherit; font: inherit; cursor: pointer; padding: 0; text-align: left;
+  border: 0; background: none; color: inherit; font: inherit; cursor: pointer; padding: 2px 0; text-align: left;
+  border-radius: 3px; white-space: nowrap;
 }
+.acols .sort:focus-visible { outline: 2px solid var(--grape-ink); outline-offset: 1px; }
 .acols .sort.c-num { text-align: right; }
 .acols .sort:hover { color: var(--ink); }
 .acols .sort.asc, .acols .sort.desc { color: var(--ink); font-weight: 600; }

@@ -23,7 +23,7 @@ from .core.sync import MANIFEST_NAME, Manifest
 from .core.util import fmt_bytes, fs_path
 from .catalog import album_wants
 
-log = logging.getLogger("dircrawl")
+log = logging.getLogger("khinsider_sync")
 
 REASONS = {
     "gone": "No longer on the site",

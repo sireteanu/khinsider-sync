@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.1] - 2026-10-24
+
+### Changed
+- Removed what was left over from Rom Sync: the old folder-tree styles, page-reading helpers for
+  lolroms listings, ignore rules for its files; the log is now named after Khinsider Sync.
+- The download record calls the album page's date and size by their names; records from 1.0.0
+  are taken over at the first start.
+
 ## [1.0.0] - 2026-10-23
 
 ### New

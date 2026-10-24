@@ -109,7 +109,7 @@ tests/  conftest (app_factory + API helpers), mock_site, fixtures/ (real markup 
 ## Conventions
 - Dependencies: httpx[http2], selectolax, fastapi, uvicorn, curl_cffi (+ pytest/pyflakes). Ask before adding more.
   The app must keep working without curl_cffi (plain httpx, a warning in the log).
-- Log through `logging.getLogger("dircrawl")`. Never `print`.
+- Log through `logging.getLogger("khinsider_sync")`. Never `print`.
 - Every user-visible change gets a test against `MockSite`. **MockSite copies the live markup**; when
   the site changes, update `tests/fixtures/` from the real page first (browser), then the mock and
   `parse.py`. Use the `investigate-site` skill.

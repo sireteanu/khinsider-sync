@@ -19,7 +19,7 @@ from . import __version__
 from .catalog import ALBUM, PLATFORM, album_wants, split_platforms
 from .engine import Engine
 
-log = logging.getLogger("dircrawl")
+log = logging.getLogger("khinsider_sync")
 
 STATIC = os.path.join(os.path.dirname(__file__), "static")
 SORTS = ("name", "year", "added", "new", "size", "synced")

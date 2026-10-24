@@ -27,7 +27,7 @@ from . import __version__, parse
 from .catalog import ALBUM, PLATFORM, Catalog, album_plan, album_rank, parse_format_setting, parse_formats
 from .scanner import Scanner
 
-log = logging.getLogger("dircrawl")
+log = logging.getLogger("khinsider_sync")
 USER_AGENT = f"Mozilla/5.0 (compatible; khinsider-sync/{__version__})"
 SITE = "https://downloads.khinsider.com/"
 LAYOUTS = ("album", "platform", "type", "year")
@@ -823,7 +823,7 @@ class Engine:
             st = self.sync_stats
             active = list(dl.active.items())
             # what this sync still has to transfer: planned sizes of unfinished files minus what the
-            # files in progress already have on disk (listing sizes are rounded, so it's an estimate)
+            # files in progress already have on disk (page sizes are rounded, so it's an estimate)
             left = max(0, st["bytes_planned"] - st["bytes_settled"] - sum(h for _, (h, _t) in active))
             running = self.busy and self.job.get("phase") == "downloading"
             eta = (left / self.eta_speed if running and self.eta_speed > 0 and not dl.paused and not dl.outage

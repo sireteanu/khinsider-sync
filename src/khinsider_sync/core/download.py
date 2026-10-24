@@ -6,7 +6,7 @@ download, right before each try (see engine.Resolver).
 
 `Downloader.plan()` decides what a listed file needs (see sync.plan); files that need nothing are
 handled right there without a request. `Downloader.download()` fetches the rest: .part files,
-Range/If-Range resume, conditional GET, HTML-instead-of-file detection, archive header check,
+Range/If-Range resume, conditional GET, HTML-instead-of-file detection, audio/image header check,
 disk-space guard, site date on the saved file, and feedback to the DownloadGate.
 Results are reported through callbacks so each front end can keep its own bookkeeping.
 """
@@ -30,7 +30,7 @@ from .sync import (ADOPT, CHECK, FETCH_ACTIONS, NEW, RESUME, UPDATE, FileInfo, M
                    http_date_epoch, plan, stamp_file)
 from .util import DiskFull, FetchError, fmt_bytes, fs_path
 
-log = logging.getLogger("dircrawl")
+log = logging.getLogger("khinsider_sync")
 
 DONE_WORD = {NEW: "new", UPDATE: "updated", RESUME: "resumed", CHECK: "updated"}
 DONE, QUEUED = "done", "queued"     # download() results (or a float: retry after that many seconds)

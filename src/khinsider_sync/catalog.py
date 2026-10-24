@@ -60,7 +60,7 @@ def join_platforms(slugs: Iterable[str]) -> str:
 
 
 def size_bytes(text: Optional[str]) -> int:
-    """Best estimate of a listing size like '5.64 MB'."""
+    """Best estimate of a size shown on an album page, like '5.64 MB'."""
     rng = size_range(text) if text else None
     return (rng[0] + rng[1]) // 2 if rng else 0
 

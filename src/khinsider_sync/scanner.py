@@ -22,7 +22,7 @@ from .core.util import FetchError
 from . import parse
 from .catalog import Catalog
 
-log = logging.getLogger("dircrawl")
+log = logging.getLogger("khinsider_sync")
 
 
 def browse_url(base: str, letter: str, page: int) -> str:

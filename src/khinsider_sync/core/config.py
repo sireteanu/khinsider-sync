@@ -10,7 +10,6 @@ from .constants import DEFAULT_UA
 @dataclass
 class Config:
     start_url: str                    # the site; asked when downloads keep failing (is it down?)
-    timeout: float = 15.0
     retries: int = 2
     user_agent: str = DEFAULT_UA
     # downloading

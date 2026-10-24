@@ -7,11 +7,11 @@ import re
 import time
 from typing import Optional
 
-log = logging.getLogger("dircrawl")
+log = logging.getLogger("khinsider_sync")
 
 
 class Limiter:
-    """Concurrency + pacing for listing pages, with additive-increase / multiplicative-decrease."""
+    """Concurrency + pacing for page reads, with additive-increase / multiplicative-decrease."""
 
     def __init__(self, max_conc: int, delay: float, adaptive: bool, slow_secs: float):
         self.max = max(1, max_conc)
@@ -192,7 +192,7 @@ class DownloadGate:
 
     # -- feedback --
     async def tick(self, backlog: int) -> None:
-        """Called about once a second by the crawler."""
+        """Called about four times a second by the sync."""
         if not self.auto:
             return
         now = time.monotonic()
