@@ -32,11 +32,14 @@ page hasn't been read yet don't have a size; the next sync reads them.
 
 ## 4. Choose formats and folders (Settings, in the ☰ menu)
 
-- **Formats**: MP3 (default), FLAC where offered, best quality, every format, or your own list.
+- **Formats and download order**: tick the formats you want - and *Images* for covers and scans -
+  and move them up or down. Choose whether an album gets **only the first ticked format it has**
+  (e.g. FLAC, else MP3) or **every ticked format** (e.g. FLAC and MP3). Files download in that
+  order: all the FLAC files first, then the MP3s. The buttons above the list fill it in for you.
   FLAC is often 3 to 5 times bigger.
 - **Track names**: as khinsider names them, or `01 - Title.mp3` / `1-01 - Title.flac` from the
   album's disc and track numbers.
-- **Also save each album's images**: covers and scans next to the music, or in an `Art` folder.
+- **Art folder**: put the images in an `Art` folder inside each album's folder.
 - **Folders**: one folder per album, or grouped by platform, type or year.
 - **A ticked platform brings in these album types**: e.g. tick only *Gamerip* so ticking SNES
   doesn't also bring in every arrangement and remix.

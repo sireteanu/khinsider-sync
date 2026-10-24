@@ -314,3 +314,34 @@ def test_an_album_can_have_its_own_formats(site, app_factory):
     sync(c)
     left = {f["path"]: f["reason"] for f in c.get("/api/cleanup").json()["files"]}
     assert left.get("Super Mario World/01. Nintendo Logo.flac") == "unticked"
+
+
+def test_a_format_list_picks_formats_and_their_download_order(site, app_factory):
+    c = app_factory(site, settings={"formats": "all:.flac,.mp3", "parallel": "1"})
+    s = c.get("/api/settings").json()["settings"]
+    assert s["formats"] == "all:.flac,.mp3" and s["album_art"] is False, "no images in the list"
+    scan(c)
+    select(c, "a:" + SMW)
+    select(c, "a:" + BIRD)
+    sync(c)
+    files = on_disk(c.data)
+    assert {f for f in files if f.startswith("Super Mario World/")} == SMW_MP3 | {p.replace(".mp3", ".flac") for p in SMW_MP3}
+    assert {f for f in files if f.startswith("A Bird Story/")} == {
+        "A Bird Story/A Bird Story (Piano).mp3", "A Bird Story/Yesterday - Kan (Reives) Gao.mp3"}, "no FLAC, no OGG"
+    got = [p for p, _ in site.file_requests()]
+    last_flac = max(i for i, p in enumerate(got) if p.endswith(".flac"))
+    first_mp3 = min(i for i, p in enumerate(got) if p.endswith(".mp3"))
+    assert last_flac < first_mp3, "every FLAC file comes before the first MP3"
+
+
+def test_first_of_a_list_skips_albums_without_any_of_it(site, app_factory):
+    c = app_factory(site, settings={"formats": "first:.flac,art"})
+    scan(c)
+    select(c, "a:" + SMW)
+    select(c, "a:" + BIRD)
+    st = sync(c)
+    files = on_disk(c.data)
+    assert "Super Mario World/01. Nintendo Logo.flac" in files and "Super Mario World/Cover.jpg" in files
+    assert not any(f.endswith((".mp3", ".ogg")) for f in files)
+    assert files & {"A Bird Story/cover.jpg"}, "its images are still on the list"
+    assert st["sync"]["failed"] == 0

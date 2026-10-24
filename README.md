@@ -48,7 +48,7 @@ modest, don't sync the whole site, and consider [donating](https://downloads.khi
 | Browsing | Platforms on the left with album counts; the album list with search, type filter (Gamerip, Soundtrack, Arrangement …), "Ticked / With synced files / With problems" filters, and sorting by name, year, size or how much is synced. |
 | Selection | Tick an album, or tick a platform for **every album of it, including ones added later** (optionally only some album types, e.g. gamerips). Untick single albums of a ticked platform as exceptions. Ticks are saved immediately. |
 | Album details | Click an album: its tracks per disc with every format and size, its images, what is synced, where it is saved. The album's page is read the first time you open it. |
-| Formats | MP3 (default), FLAC where offered, best quality (FLAC → WAV → … → M4A → OPUS → OGG → MP3, the first the album has), every format, or a list such as `.mp3, .ogg`. Any album can have **its own formats** (e.g. FLAC for favourites). Album images (covers, scans) are saved too unless you turn that off, optionally in an `Art` folder. |
+| Formats | **Your own list, in your order**: tick the formats you want (and the album images) and move them up or down; an album gets either only the first ticked format it has, or every ticked one (e.g. FLAC *and* MP3). Files download in that order - every FLAC file of the sync before the first MP3. Quick picks: MP3 (default), FLAC else MP3, FLAC and MP3, best quality (FLAC → WAV → … → M4A → OPUS → OGG → MP3), everything. Any album can have **its own formats** (e.g. FLAC for favourites). Album images (covers, scans) are saved too unless you turn that off, optionally in an `Art` folder. |
 | Track names | As khinsider names them (`1-01. Title.mp3`), or numbered from the album page's disc and track columns (`01 - Title.mp3`, `1-01 - Title.flac`). |
 | Getting through | Requests look like Chrome (its TLS fingerprint and headers, via curl_cffi) and name khinsider as the Referer, as khi-explorer does, so Cloudflare's bot protection lets them through. Can be turned off. |
 | Folders | One folder per album, named after the album (clashing names get the type and year added). Optionally grouped by platform, type or year. **Saved as** puts one album anywhere you like. Changing either **moves** what you already have instead of downloading it again. |
@@ -159,13 +159,21 @@ Sizes in the storage strip only count albums whose pages were read; it says how 
 
 | Formats setting | Per album |
 |---|---|
+| `first:.flac,.mp3,art` | the first of the listed formats the album has (none of them: no music from that album); `art` = its images, where it stands in the list |
+| `all:.flac,.mp3,art` | every listed format the album has |
 | `mp3` | MP3 (an album without MP3: its first format, so nothing is left out) |
 | `flac` | FLAC where the album has it, else MP3 |
 | `best` | the first of FLAC, WAV, APE, WV, M4A, OPUS, OGG, AAC, MP3 the album has (khi-explorer's order) |
 | `all` | every format the album offers |
 | `.mp3, .ogg` | exactly these, where offered |
 
-Plus the album's images when "Also save each album's images" is on. **Formats for this album** in an
+The two list forms are what the Settings editor saves (**Formats and download order**: tick, move
+up/down, "Only the first ticked format an album has" or "Every ticked format"); the presets below
+them are the older settings, where images follow `album_art`.
+
+**Download order**: a sync queues files by their format's place in the list (presets: FLAC, WAV …
+MP3, images last), then album by album and track by track - so with `FLAC, MP3` you get every FLAC
+file of the sync before the first MP3. **Formats for this album** in an
 album's window overrides the setting for that album (stored in `album_formats`).
 
 ### Folders
@@ -245,8 +253,8 @@ Stored in the catalog (`settings` table); changed in the Settings dialog or `POS
 | Key | Default | Meaning |
 |---|---|---|
 | `data_dir` | from `--data` | Download folder (locked to `KHINSIDER_DATA` in Docker) |
-| `formats` | `mp3` | `mp3`, `flac`, `best`, `all`, or a list like `.mp3,.ogg` |
-| `album_art` | `true` | Also save each album's images |
+| `formats` | `mp3` | `first:<list>` or `all:<list>` in priority order (formats like `.flac`, and `art` for images), or a preset `mp3`, `flac`, `best`, `all`; older `.mp3,.ogg` = `all:` with images per `album_art` |
+| `album_art` | `true` | Save each album's images with a preset; a `first:`/`all:` list sets it from whether `art` is in it |
 | `platform_types` | `[]` | Album types a ticked platform brings in (`[]` = all) |
 | `folder_layout` | `album` | `album`, `platform`, `type` or `year` |
 | `album_places` | `{}` | Saved as: `{album slug: folder}`; changed only with `POST /api/album-place` |

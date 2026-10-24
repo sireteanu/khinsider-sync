@@ -30,3 +30,6 @@
 - Track names numbered from the disc and track columns (`1-01 - Title.flac`), as a setting.
 - Album images in an Art folder, as a setting.
 - Formats for a single album (e.g. FLAC for favourites), in the album's window.
+- Formats and download order: tick the formats you want (and the album images), put them in your
+  order, and choose the first one an album has or all of them (e.g. only FLAC and MP3). Files
+  download in that order across the whole sync.

@@ -165,6 +165,8 @@
       <option value="flac">FLAC where offered, else MP3</option>
       <option value="best">Best quality offered</option>
       <option value="all">Every format</option>
+      <option value="first:.flac,.mp3,art">FLAC, else MP3 (only these two)</option>
+      <option value="all:.flac,.mp3,art">FLAC and MP3</option>
     </select></label>
   <label class="field al-place"><span>Saved as</span>
     <span class="unit"><input id="al-place" spellcheck="false" autocomplete="off"><button id="al-place-save" class="btn small" type="button">Save</button></span>
@@ -179,17 +181,25 @@
     <label class="field"><span>Download folder</span>
       <input name="data_dir" required>
       <small id="data-hint">Each album gets a folder of its own in here.</small></label>
-    <div class="row2">
-      <label class="field"><span>Formats</span>
-        <select name="formats_mode">
-          <option value="mp3">MP3</option>
-          <option value="flac">FLAC where offered, else MP3</option>
-          <option value="best">Best quality (lossless where offered)</option>
-          <option value="all">Every format the album offers</option>
-          <option value="custom">Only these formats</option>
+    <fieldset class="field fmt-box"><legend>Formats and download order</legend>
+      <div class="fmt-top">
+        <select id="fmt-mode" aria-label="Which formats">
+          <option value="first">Only the first ticked format an album has, from the top</option>
+          <option value="all">Every ticked format an album has</option>
         </select>
-        <input name="formats_custom" placeholder=".mp3, .ogg" hidden>
-        <small>FLAC albums are often 3 to 5 times the size of MP3.</small></label>
+        <span class="fmt-presets">
+          <button type="button" class="btn small ghost" data-preset="mp3">MP3</button>
+          <button type="button" class="btn small ghost" data-preset="flac">FLAC, else MP3</button>
+          <button type="button" class="btn small ghost" data-preset="flacmp3">FLAC and MP3</button>
+          <button type="button" class="btn small ghost" data-preset="best">Best quality</button>
+          <button type="button" class="btn small ghost" data-preset="all">Everything</button>
+        </span>
+      </div>
+      <ol id="fmt-list" class="fmt-list"></ol>
+      <small id="fmt-hint">Tick the formats you want and move them up or down. Files download in this order:
+        everything in the top format first (across all albums), then the next. FLAC is often 3 to 5 times
+        the size of MP3. An album with none of the ticked formats isn't downloaded.</small></fieldset>
+    <div class="row2">
       <label class="field"><span>Folders</span>
         <select name="folder_layout">
           <option value="album">One folder per album</option>
@@ -198,17 +208,13 @@
           <option value="year">Year / album</option>
         </select>
         <small>Changing this moves albums you have at the next sync.</small></label>
-    </div>
-    <div class="row2">
       <label class="field"><span>Track names</span>
         <select name="track_names">
           <option value="site">As khinsider names them (1-01. Title.mp3)</option>
           <option value="numbered">Disc and track number (1-01 - Title.mp3)</option>
         </select>
         <small>Changing this renames the tracks you have at the next sync.</small></label>
-      <span></span>
     </div>
-    <label class="check"><input type="checkbox" name="album_art"> Also save each album's images (covers, scans)</label>
     <label class="check"><input type="checkbox" name="art_folder"> Put the images in an Art folder inside the album's folder</label>
     <fieldset class="field types-box"><legend>A ticked platform brings in these album types</legend>
       <div id="types-list" class="types-list"></div>

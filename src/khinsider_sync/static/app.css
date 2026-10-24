@@ -411,3 +411,21 @@ table.files tr.unwanted td { opacity: .45; }
   .albums-pane .toolbar { flex-wrap: wrap; }
   .albums-pane .toolbar input { flex-basis: 100%; }
 }
+.fmt-box { border: 1px solid var(--line); border-radius: var(--radius-s); padding: 8px 10px 10px; }
+.fmt-box legend { font-weight: 600; padding: 0 4px; }
+.fmt-top { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin-bottom: 6px; }
+.fmt-top select { padding: 6px 8px; font: inherit; font-size: 13px; color: var(--ink); background: var(--field);
+  border: 1px solid var(--line); border-radius: var(--radius-s); }
+.fmt-presets { display: flex; flex-wrap: wrap; gap: 4px; }
+.fmt-list { list-style: none; margin: 0 0 6px; padding: 0; counter-reset: fmt; columns: 2; column-gap: 16px; }
+.fmt-list li { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 1px 4px;
+  border-radius: var(--radius-s); break-inside: avoid; }
+.fmt-list li:hover { background: var(--grape-soft); }
+.fmt-list li .check { margin: 2px 0; flex: 1; }
+.fmt-list li.on .check span::before { counter-increment: fmt; content: counter(fmt) ". "; color: var(--ink-2); }
+.fmt-list li:not(.on) .check span { color: var(--ink-2); }
+.fmt-move { display: inline-flex; gap: 2px; }
+.fmt-move .btn { padding: 1px 6px; font-size: 10px; line-height: 1.4; }
+@media (max-width: 640px) { .fmt-list { columns: 1; } }
+.field .check input[type=checkbox] { width: auto; padding: 0; flex: none; }
+.fmt-list li .check span { white-space: nowrap; }

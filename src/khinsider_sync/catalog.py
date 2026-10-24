@@ -22,7 +22,7 @@ from .core.sync import size_range
 SYNCED_WORDS = ("new", "updated", "resumed", "up to date", "already in folder")
 
 DEFAULT_SETTINGS = {
-    "formats": "mp3",               # mp3 | flac | best | all | ".mp3,.ogg"
+    "formats": "mp3",               # mp3 | flac | best | all | "first:.flac,.mp3,art" | "all:.flac,.mp3"
     "album_art": True,              # also save the album's images (covers, scans)
     "platform_types": [],           # album types a ticked platform brings in ([] = every type)
     "folder_layout": "album",       # album | platform | type | year  (folder above each album)
@@ -65,33 +65,95 @@ def size_bytes(text: Optional[str]) -> int:
     return (rng[0] + rng[1]) // 2 if rng else 0
 
 
-def wanted_exts(setting, album_formats: Iterable[str], art: bool) -> frozenset:
-    """Which of an album's files are synced: the audio formats picked in Settings (`formats`) that
-    the album has, plus its images when `art` is on.
+PRESETS = ("mp3", "flac", "best", "all")
+MODES = ("first", "all")
+
+
+def parse_format_setting(text) -> tuple:
+    """A formats setting -> (mode, [items in priority order] or None for a preset, preset or None).
+      mp3 | flac | best | all          presets (see format_plan)
+      first:.flac,.mp3,art             the first listed format an album has, in this order
+      all:.flac,.mp3,art               every listed format an album has, downloaded in this order
+      .mp3,.ogg                        (older form) the same as all:.mp3,.ogg
+    "art" stands for the album's images. Raises ValueError for anything else."""
+    s = str(text or "").strip().lower()
+    if s in PRESETS:
+        return None, None, s
+    mode = "all"
+    if ":" in s:
+        mode, _, s = s.partition(":")
+        mode = mode.strip()
+        if mode not in MODES:
+            raise ValueError("a format list starts with first: or all:")
+    items = []
+    for e in s.split(","):
+        e = e.strip()
+        if not e:
+            continue
+        e = "art" if e in ("art", "images", "image") else "." + e.lstrip(".")
+        if e != "art" and e not in AUDIO_EXTENSIONS:
+            raise ValueError(f"unknown format {e} (known: {', '.join(sorted(AUDIO_EXTENSIONS))}, art)")
+        if e not in items:
+            items.append(e)
+    if not any(i != "art" for i in items):
+        raise ValueError("pick at least one audio format")
+    return mode, items, None
+
+
+def format_plan(setting, album_formats: Iterable[str], art: bool) -> list:
+    """Which of an album's files a sync saves, in the order they are downloaded: audio formats
+    (".flac", ...) and "art" for its images.
       mp3   MP3 (or, when an album has no MP3, its first format, so nothing is left out)
       flac  FLAC (or, without it, MP3 / the first format)
       best  the best format the album has: FLAC, WAV, ... M4A, OPUS, OGG, AAC, then MP3
       all   every format the album offers
-      ".mp3,.ogg"  exactly these"""
+      first:<list>  the first format of the list the album has (nothing if it has none of them)
+      all:<list>    every format of the list the album has
+    Presets add the images (last) when `art` is on; a list has them where "art" stands in it."""
     have = [f for f in album_formats if f]
-    s = str(setting or "mp3").strip().lower()
-    if s == "all":
-        out = set(have)
-    elif s in ("mp3", "flac", "best"):
+    mode, items, preset = parse_format_setting(setting or "mp3")
+    if items is not None and ":" not in str(setting):
+        # the older ".mp3,.ogg" form: these formats, the images as the album_art setting says
+        out = [i for i in items if i in have and i != "art"]
+        return out + (["art"] if art else [])
+    if preset == "all":
+        out = list(have)
+    elif preset:
         pick = None
-        if s == "flac" and ".flac" in have:
+        if preset == "flac" and ".flac" in have:
             pick = ".flac"
-        elif s == "best":
+        elif preset == "best":
             pick = next((f for f in BEST_ORDER if f in have), None)
         if pick is None:
             pick = ".mp3" if ".mp3" in have else (have[0] if have else None)
-        out = {pick} if pick else set()
+        out = [pick] if pick else []
     else:
-        want = {"." + e.strip().lstrip(".") for e in s.split(",") if e.strip()}
-        out = {f for f in have if f in want}
+        out = []
+        picked = False
+        for i in items:
+            if i == "art":
+                out.append("art")
+            elif i in have and not (mode == "first" and picked):
+                out.append(i)
+                picked = True
+        return out
     if art:
-        out.add("art")
-    return frozenset(out)
+        out.append("art")
+    return out
+
+
+def format_rank(setting, key: str) -> int:
+    """Where a format (or "art") stands in a formats setting's order: the download order across
+    albums. Presets follow BEST_ORDER, their images come last."""
+    _mode, items, preset = parse_format_setting(setting or "mp3")
+    order = list(items) if items is not None else list(BEST_ORDER)
+    if items is None or ":" not in str(setting):
+        order.append("art")
+    return order.index(key) if key in order else len(order) + 1
+
+
+def wanted_exts(setting, album_formats: Iterable[str], art: bool) -> frozenset:
+    return frozenset(format_plan(setting, album_formats, art))
 
 
 def formats_for(settings: dict, slug: str) -> str:
@@ -99,19 +161,21 @@ def formats_for(settings: dict, slug: str) -> str:
     return (settings.get("album_formats") or {}).get(slug) or settings.get("formats") or "mp3"
 
 
+def album_plan(settings: dict, slug: str, album_formats) -> list:
+    return format_plan(formats_for(settings, slug), album_formats, bool(settings.get("album_art")))
+
+
+def album_rank(settings: dict, slug: str, key: str) -> int:
+    return format_rank(formats_for(settings, slug), key)
+
+
 def album_wants(settings: dict, slug: str, album_formats) -> frozenset:
-    return wanted_exts(formats_for(settings, slug), album_formats, bool(settings.get("album_art")))
+    return frozenset(album_plan(settings, slug, album_formats))
 
 
 def parse_formats(text) -> None:
     """Raises ValueError for a formats setting that can't work."""
-    s = str(text or "").strip().lower()
-    if s in ("mp3", "flac", "best", "all"):
-        return
-    exts = {"." + e.strip().lstrip(".") for e in s.split(",") if e.strip()}
-    if not exts or not exts <= AUDIO_EXTENSIONS:
-        raise ValueError("formats must be mp3, flac, best, all or a list like .mp3, .ogg "
-                         f"(known: {', '.join(sorted(AUDIO_EXTENSIONS))})")
+    parse_format_setting(text)
 
 
 class Catalog:

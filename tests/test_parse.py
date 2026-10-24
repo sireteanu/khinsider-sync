@@ -119,3 +119,24 @@ def test_album_images_from_any_gallery_but_not_comments_or_other_albums():
     </div></body></html>"""
     a = parse.parse_album(page, f"{SITE}/game-soundtracks/album/x")
     assert a["images"] == ["https://cdn.example/s/x/Front.jpg", "https://cdn.example/s/x/Back.webp"]
+
+
+@pytest.mark.parametrize("setting, have, out", [
+    ("first:.flac,.mp3", [".mp3", ".flac"], [".flac"]),
+    ("first:.flac,.mp3", [".mp3", ".ogg"], [".mp3"]),
+    ("first:.flac,.mp3", [".ogg"], []),                        # only these two: nothing else
+    ("all:.flac,.mp3", [".mp3", ".flac", ".ogg"], [".flac", ".mp3"]),
+    ("all:.mp3,art,.flac", [".mp3", ".flac"], [".mp3", "art", ".flac"]),
+    ("first:art,.ogg,.mp3", [".mp3", ".ogg"], ["art", ".ogg"]),
+    (".mp3, .ogg", [".ogg", ".mp3"], [".mp3", ".ogg", "art"]),  # older form: images as album_art says
+])
+def test_format_lists_keep_their_order(setting, have, out):
+    from khinsider_sync.catalog import format_plan
+    assert format_plan(setting, have, art=True) == out
+
+
+def test_format_lists_are_checked():
+    for bad in ("first:", "first:art", "sideways:.mp3", "all:.exe"):
+        with pytest.raises(ValueError):
+            parse_formats(bad)
+    parse_formats("first:.flac,.mp3,images")

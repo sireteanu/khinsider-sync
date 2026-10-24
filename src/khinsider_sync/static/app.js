@@ -290,9 +290,15 @@ function showAlbum(d) {
   $("#al-site").href = d.page;
   const fsel = $("#al-formats");
   const names = { mp3: "MP3", flac: "FLAC where offered", best: "best quality", all: "every format" };
-  fsel.options[0].textContent = `Same as Settings (${names[d.default_formats] || d.default_formats})`;
+  const describe = (v) => {
+    if (names[v]) return names[v];
+    const m = /^(first|all):(.*)$/.exec(v || "") || [null, "all", v || ""];
+    const list = m[2].split(",").filter(Boolean).map((x) => (x === "art" ? "images" : x.replace(/^\./, "").toUpperCase()));
+    return (m[1] === "first" ? "first of " : "") + list.join(", ");
+  };
+  fsel.options[0].textContent = `Same as Settings (${describe(d.default_formats)})`;
   if (d.formats && ![...fsel.options].some((o) => o.value === d.formats)) {
-    const o = document.createElement("option"); o.value = d.formats; o.textContent = d.formats; fsel.append(o);
+    const o = document.createElement("option"); o.value = d.formats; o.textContent = describe(d.formats); fsel.append(o);
   }
   fsel.value = d.formats || "";
   fsel.onchange = async () => {
@@ -604,11 +610,86 @@ $("#btn-clear-sel").addEventListener("click", async () => {
 /* ---------------------------------------------------------------- settings */
 const form = $("#settings-form");
 function syncFields() {
-  form.formats_custom.hidden = form.formats_mode.value !== "custom";
   $("#par-label").textContent = form.parallel_mode.value === "auto" ? "Upper limit" : "Number of downloads";
 }
-form.formats_mode.addEventListener("change", syncFields);
 form.parallel_mode.addEventListener("change", syncFields);
+
+/* formats: an ordered list of formats (and "art" = the album's images), each on or off, and whether
+   an album gets only the first ticked format it has or every one. Saved as "first:.flac,.mp3,art". */
+const FMT_ALL = [".flac", ".wav", ".ape", ".wv", ".m4a", ".opus", ".ogg", ".aac", ".mp3", ".wma", "art"];
+const FMT_NAME = { art: "Images (covers, scans)" };
+const BEST = [".flac", ".wav", ".ape", ".wv", ".m4a", ".opus", ".ogg", ".aac", ".mp3"];
+let fmt = { mode: "first", items: [] }, fmtDirty = false;
+function fmtFrom(setting, art) {
+  const s = String(setting || "mp3").trim().toLowerCase();
+  let mode = "first", on = [];
+  if (s === "mp3") on = [".mp3"];
+  else if (s === "flac") on = [".flac", ".mp3"];
+  else if (s === "best") on = BEST.slice();
+  else if (s === "all") { mode = "all"; on = FMT_ALL.filter((f) => f !== "art"); }
+  else {
+    let list = s;
+    if (s.includes(":")) { [mode, list] = s.split(/:(.*)/s); }
+    else mode = "all";
+    on = list.split(",").map((x) => x.trim()).filter(Boolean)
+      .map((x) => (["art", "images", "image"].includes(x) ? "art" : "." + x.replace(/^\./, "")));
+  }
+  if (!s.includes(":") && art && !on.includes("art")) on.push("art");
+  const rest = FMT_ALL.filter((f) => !on.includes(f));
+  return { mode, items: on.map((k) => ({ key: k, on: true })).concat(rest.map((k) => ({ key: k, on: false }))) };
+}
+function fmtString() {
+  return fmt.mode + ":" + fmt.items.filter((i) => i.on).map((i) => i.key).join(",");
+}
+function renderFmt() {
+  $("#fmt-mode").value = fmt.mode;
+  const ol = $("#fmt-list");
+  ol.innerHTML = "";
+  fmt.items.forEach((it, i) => {
+    const li = document.createElement("li");
+    li.className = it.on ? "on" : "";
+    li.innerHTML = `<label class="check"><input type="checkbox"><span></span></label>
+      <span class="fmt-move"><button type="button" class="btn icon small up" aria-label="Move up">▲</button>
+      <button type="button" class="btn icon small down" aria-label="Move down">▼</button></span>`;
+    const name = FMT_NAME[it.key] || it.key.slice(1).toUpperCase();
+    $("span", li).textContent = name;
+    const box = $("input", li);
+    box.checked = it.on;
+    box.addEventListener("change", () => { it.on = box.checked; fmtDirty = true; renderFmt(); });
+    $(".up", li).disabled = i === 0;
+    $(".down", li).disabled = i === fmt.items.length - 1;
+    $(".up", li).setAttribute("aria-label", `Move ${name} up`);
+    $(".down", li).setAttribute("aria-label", `Move ${name} down`);
+    $(".up", li).addEventListener("click", () => moveFmt(i, -1));
+    $(".down", li).addEventListener("click", () => moveFmt(i, 1));
+    ol.append(li);
+  });
+}
+function moveFmt(i, d) {
+  const j = i + d;
+  if (j < 0 || j >= fmt.items.length) return;
+  [fmt.items[i], fmt.items[j]] = [fmt.items[j], fmt.items[i]];
+  fmtDirty = true;
+  renderFmt();
+  const btn = $("#fmt-list").children[j].querySelector(d < 0 ? ".up" : ".down");
+  (btn.disabled ? $("#fmt-list").children[j].querySelector("input") : btn).focus();
+}
+$("#fmt-mode").addEventListener("change", (e) => { fmt.mode = e.target.value; fmtDirty = true; });
+for (const b of document.querySelectorAll(".fmt-presets button")) {
+  b.addEventListener("click", () => {
+    const art = fmt.items.some((i) => i.key === "art" && i.on);
+    const p = b.dataset.preset;
+    fmt = fmtFrom(p === "flacmp3" ? "all:.flac,.mp3" : p === "flac" ? "first:.flac,.mp3" : p === "mp3" ? "first:.mp3" : p, false);
+    if (art) {                          // keep the images choice
+      const a = fmt.items.find((i) => i.key === "art");
+      a.on = true;
+      fmt.items = fmt.items.filter((i) => i !== a);
+      fmt.items.splice(fmt.items.filter((i) => i.on).length, 0, a);
+    }
+    fmtDirty = true;
+    renderFmt();
+  });
+}
 
 $("#btn-settings").addEventListener("click", async () => {
   const [{ settings: s, data_locked }, plats] = await Promise.all([api("/api/settings"), api("/api/platforms")]);
@@ -617,11 +698,10 @@ $("#btn-settings").addEventListener("click", async () => {
   $("#data-hint").textContent = data_locked
     ? "Set by the container's /data mapping - change it in the Docker template."
     : "Each album gets a folder of its own in here.";
-  const f = String(s.formats || "mp3");
-  form.formats_mode.value = ["mp3", "flac", "best", "all"].includes(f) ? f : "custom";
-  form.formats_custom.value = form.formats_mode.value === "custom" ? f : "";
+  fmt = fmtFrom(s.formats, !!s.album_art);
+  fmtDirty = false;
+  renderFmt();
   form.folder_layout.value = s.folder_layout || "album";
-  form.album_art.checked = !!s.album_art;
   form.art_folder.checked = !!s.art_folder;
   form.track_names.value = s.track_names || "site";
   form.impersonate.checked = s.impersonate !== false;
@@ -659,9 +739,7 @@ $("#settings-save").addEventListener("click", async (e) => {
   e.preventDefault();
   const auto = form.parallel_mode.value === "auto";
   const body = {
-    formats: form.formats_mode.value === "custom" ? form.formats_custom.value : form.formats_mode.value,
     folder_layout: form.folder_layout.value,
-    album_art: form.album_art.checked,
     art_folder: form.art_folder.checked,
     track_names: form.track_names.value,
     impersonate: form.impersonate.checked,
@@ -678,6 +756,7 @@ $("#settings-save").addEventListener("click", async (e) => {
     resume_interrupted: form.resume_interrupted.checked,
   };
   if (auto) body.parallel_max = form.parallel_n.value || 8;
+  if (fmtDirty) body.formats = fmtString();      // untouched: keep the setting as it is
   if (!form.data_dir.readOnly) body.data_dir = form.data_dir.value.trim();
   try {
     await api("/api/settings", { method: "POST", body });

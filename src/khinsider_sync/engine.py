@@ -24,7 +24,7 @@ from .core.sync import MANIFEST_NAME, FileInfo, Manifest, size_range, stamp_fold
 from .core.util import fmt_bytes, parse_size, safe_segment
 
 from . import __version__, parse
-from .catalog import ALBUM, PLATFORM, Catalog, album_wants, parse_formats
+from .catalog import ALBUM, PLATFORM, Catalog, album_plan, album_rank, parse_format_setting, parse_formats
 from .scanner import Scanner
 
 log = logging.getLogger("dircrawl")
@@ -363,6 +363,10 @@ class Engine:
                 if not v:
                     raise ValueError("the download folder can't be empty")
             clean[k] = v
+        if "formats" in clean:
+            _mode, items, _preset = parse_format_setting(clean["formats"])
+            if items is not None and ":" in clean["formats"]:   # such a list says itself whether images are saved
+                clean["album_art"] = "art" in items
         moving = [k for k in ("folder_layout", "track_names", "art_folder") if k in clean and clean[k] != s.get(k)]
         self.catalog.save_settings(clean)
         if moving:
@@ -500,9 +504,14 @@ class Engine:
             albums = self.catalog.albums_by_slug(slugs)
         self.scanner = None
         self.job["phase"] = "checking what needs downloading"
-        want = {a: album_wants(s, a, d["formats"]) for a, d in albums.items()}
+        # each album's files in the order of its formats setting: with "FLAC, then MP3", every
+        # FLAC file of the sync is queued before the first MP3 file, album by album within that
+        plan = {a: album_plan(s, a, d["formats"]) for a, d in albums.items()}
+        rank = {a: {k: album_rank(s, a, k) for k in p} for a, p in plan.items()}
         rows = [r for r in self.catalog.files_of(albums)
-                if ("art" if r[4] == "art" else r[3]) in want.get(r[2], ())]
+                if ("art" if r[4] == "art" else r[3]) in rank.get(r[2], {})]
+        order = {r[0]: i for i, r in enumerate(rows)}
+        rows.sort(key=lambda r: (rank[r[2]]["art" if r[4] == "art" else r[3]], order[r[0]]))
         unread = [a for a in slugs if a in albums and not albums[a]["read"]]
         if unread:
             log.warning("%d ticked albums couldn't be read and are left out of this sync", len(unread))
