@@ -31,6 +31,37 @@ def test_platform_list_with_counts(site, app_factory):
     assert dict(d["types"]) == {"Gamerip": 4, "Soundtrack": 2, "Arrangement": 1}
 
 
+def test_platform_counts_follow_the_type_filter(site, app_factory):
+    c = app_factory(site)
+    scan(c)
+    d = c.get("/api/platforms", params={"type": "Gamerip"}).json()
+    by = {p["slug"]: p["albums"] for p in d["platforms"]}
+    assert by["windows"] == 2 and by["nintendo-snes"] == 1 and "playstation-4" not in by
+    assert d["total"] == 4 and d["no_platform"] == 0
+    assert dict(d["types"])["Soundtrack"] == 2           # the type menu still counts every type
+    d = c.get("/api/platforms", params={"type": "Soundtrack"}).json()
+    assert d["no_platform"] == 1 and d["total"] == 2
+    assert c.get("/api/platforms").json()["total"] == 7
+
+
+def test_album_list_slices_cover_every_album_and_follow_changes(site, app_factory):
+    c = app_factory(site)
+    scan(c)
+    seen = []
+    for offset in range(0, 7, 2):
+        d = c.get("/api/albums", params={"limit": 2, "offset": offset}).json()
+        assert d["total"] == 7 and d["offset"] == offset
+        seen += [a["slug"] for a in d["albums"]]
+    assert len(seen) == 7 and len(set(seen)) == 7
+    names = [a["name"].casefold() for a in c.get("/api/albums").json()["albums"]]
+    assert names == sorted(names)
+    # a tick changes the next slice (the cached view is not stale)
+    c.post("/api/select", json={"key": "a:" + seen[6], "include": True})
+    d = c.get("/api/albums", params={"limit": 2, "offset": 6}).json()
+    assert d["albums"][0]["state"] == "on"
+    assert c.get("/api/albums", params={"show": "ticked"}).json()["total"] == 1
+
+
 def test_album_list_filters_and_sorts(site, app_factory):
     c = app_factory(site)
     scan(c)

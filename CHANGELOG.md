@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.3] - 2026-10-24
+
+### Improved
+- The album list shows every album: scroll through all of them, no more "Show more". Only the rows
+  on screen are drawn and fetched, so 100,000 albums scroll as smoothly as 100.
+- With a type filter (Gamerip, Soundtrack …) the platform list on the left counts only albums of that
+  type, and "All albums" shows how many there are.
+
 ## [1.0.2] - 2026-10-24
 
 ### Changed

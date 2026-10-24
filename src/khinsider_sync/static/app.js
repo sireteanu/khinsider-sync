@@ -49,11 +49,13 @@ try { view = Object.assign(view, JSON.parse(localStorage.getItem("view")) || {},
 const saveView = () => { try { localStorage.setItem("view", JSON.stringify(view)); } catch (e) {} };
 let platforms = [];                 // from /api/platforms
 let noPlatform = 0;
+let allCount = null;              // albums of the chosen type (all of them without a type)
 
 async function loadPlatforms() {
-  const d = await api("/api/platforms");
+  const d = await api("/api/platforms?" + new URLSearchParams({ type: view.type }));
   platforms = d.platforms;
   noPlatform = d.no_platform;
+  allCount = d.total;
   const sel = $("#f-type");
   const cur = view.type;
   sel.innerHTML = '<option value="">Every type</option>';
@@ -73,10 +75,10 @@ function renderPlatforms() {
   const box = $("#plat-list");
   const f = $("#plat-filter").value.trim().toLowerCase();
   box.innerHTML = "";
-  const rows = [{ slug: "", name: "All albums", albums: null, state: null }]
+  const items = [{ slug: "", name: "All albums", albums: allCount, state: null }]
     .concat(platforms.filter((p) => !f || p.name.toLowerCase().includes(f)));
-  if (noPlatform && !f) rows.push({ slug: "-", name: "No platform", albums: noPlatform, state: null });
-  for (const p of rows) {
+  if (noPlatform && !f) items.push({ slug: "-", name: "No platform", albums: noPlatform, state: null });
+  for (const p of items) {
     const row = document.createElement("div");
     row.className = "prow" + (view.platform === p.slug ? " cur" : "") + (p.state && p.state !== "off" ? " sel" : "");
     row.innerHTML = `<input type="checkbox" class="tick"><button class="pname" type="button"></button><span class="pcount muted"></span>`;
@@ -109,8 +111,17 @@ async function tickPlatform(p, include) {
 /* ---------------------------------------------------------------- library: albums */
 const alist = $("#alist");
 const atpl = $("#album-tpl");
-const PAGE = 200;
-let loaded = 0, total = 0, listEpoch = 0;
+/* The list shows every album of the view: the scroll area is as tall as all of them, and only the
+   rows on screen (and a few around them) exist; their data is fetched a slice at a time as you
+   scroll. No "Show more" - 100,000 albums scroll like 100. */
+const PAGE = 200;                 // albums per request
+const ROW = 46;                   // height of a row (px), fixed in app.css (.arow)
+const EXTRA = 12;                 // rows kept above and below the visible ones
+let total = 0, listEpoch = 0;
+let slices = new Map();           // slice number -> albums (or a promise while loading)
+const rows = new Map();           // index -> row element on screen
+const space = document.createElement("div");
+space.className = "vspace";
 
 function fillAlbum(el, a) {
   el._a = a;
@@ -134,8 +145,10 @@ function fillAlbum(el, a) {
   $(".size", el).title = a.read ? `${nFiles(a.files)} (${a.formats.map(FMT).join(", ")})` : "Not read yet: the size shows once its page was read (open it, or sync)";
   const tick = $(".tick", el);
   tick.checked = a.state === "on";
+  tick.disabled = false;
   tick.setAttribute("aria-label", `Sync ${a.name}`);
   tick.title = a.via ? "Ticked through its platform" : a.own === false ? "Unticked although its platform is ticked" : "Sync this album";
+  el.classList.remove("blank");
   el.classList.toggle("sel", a.state === "on");
   el.classList.toggle("via", !!a.via);
   el.classList.toggle("err", !!a.error);
@@ -149,20 +162,87 @@ function fillAlbum(el, a) {
     + (a.failed ? `\n${num(a.failed)} failed` : "") : "";
 }
 
-function makeAlbum(a) {
+function makeRow() {
   const el = atpl.content.firstElementChild.cloneNode(true);
-  fillAlbum(el, a);
-  $(".tick", el).addEventListener("change", (e) => tickAlbum(el, e.target.checked));
-  $(".aname", el).addEventListener("click", () => openAlbum(el.dataset.slug));
-  $(".info", el).addEventListener("click", () => openAlbum(el.dataset.slug));
+  $(".tick", el).addEventListener("change", (e) => { if (el._a) tickAlbum(el, e.target.checked); });
+  $(".aname", el).addEventListener("click", () => el._a && openAlbum(el._a.slug));
+  $(".info", el).addEventListener("click", () => el._a && openAlbum(el._a.slug));
   return el;
 }
+function blankRow(el) {                 // a row whose album is still on its way
+  el._a = null;
+  el.classList.add("blank");
+  $(".n", el).textContent = "…";
+  for (const sel of [".sub", ".year", ".size", ".pct"]) $(sel, el).textContent = "";
+  $(".badge", el).hidden = true;
+  $(".tick", el).checked = false;
+  $(".tick", el).disabled = true;
+  $(".c-meter", el).style.visibility = "hidden";
+}
 
-function query(offset) {
+function query(offset, limit = PAGE) {
   const p = new URLSearchParams({ platform: view.platform, q: view.q, type: view.type, show: view.show,
-    sort: view.sort, dir: view.dir, offset, limit: PAGE });
+    sort: view.sort, dir: view.dir, offset, limit });
   return api("/api/albums?" + p);
 }
+
+function albumAt(i) {
+  const sl = slices.get(Math.floor(i / PAGE));
+  return Array.isArray(sl) ? sl[i % PAGE] : undefined;
+}
+
+function loadSlice(n) {
+  if (slices.has(n)) return;
+  const mine = slices;               // a reload or refresh replaces the map: then this answer is stale
+  const p = query(n * PAGE).then((d) => {
+    if (slices !== mine) return;
+    slices.set(n, d.albums);
+    if (d.total !== total) setTotal(d.total);
+    render();
+  }).catch(() => { if (slices === mine && slices.get(n) === p) slices.delete(n); });
+  slices.set(n, p);
+}
+
+function setTotal(n) {
+  total = n;
+  space.style.height = total * ROW + "px";
+  $("#list-count").textContent = nAlbums(total);
+  const none = $(".loading", alist);
+  if (!total) {
+    if (!none) {
+      const d = document.createElement("div");
+      d.className = "loading";
+      d.textContent = view.q ? `No album matches “${view.q}”.` : "No albums here.";
+      alist.append(d);
+    }
+  } else if (none) none.remove();
+}
+
+let renderQueued = false;
+function render() {
+  if (renderQueued) return;
+  renderQueued = true;
+  requestAnimationFrame(() => {
+    renderQueued = false;
+    const first = Math.max(0, Math.floor(alist.scrollTop / ROW) - EXTRA);
+    const last = Math.min(total - 1, Math.ceil((alist.scrollTop + alist.clientHeight) / ROW) + EXTRA);
+    for (const [i, el] of rows) if (i < first || i > last) { el.remove(); rows.delete(i); }
+    for (let i = first; i <= last; i++) {
+      let el = rows.get(i);
+      if (!el) {
+        el = makeRow();
+        el.style.top = i * ROW + "px";
+        rows.set(i, el);
+        space.append(el);
+      }
+      const a = albumAt(i);
+      if (a) { if (el._a !== a) fillAlbum(el, a); }
+      else { if (!el.classList.contains("blank") || el._a) blankRow(el); loadSlice(Math.floor(i / PAGE)); }
+    }
+  });
+}
+alist.addEventListener("scroll", render, { passive: true });
+window.addEventListener("resize", render);
 
 async function reload() {
   const epoch = ++listEpoch;
@@ -170,43 +250,32 @@ async function reload() {
   let d;
   try { d = await query(0); } catch (e) { $("#list-count").textContent = "Could not load: " + e.message; return; }
   if (epoch !== listEpoch) return;
+  slices = new Map([[0, d.albums]]);
+  for (const el of rows.values()) el.remove();
+  rows.clear();
   alist.innerHTML = "";
-  total = d.total;
-  loaded = d.albums.length;
-  for (const a of d.albums) alist.append(makeAlbum(a));
-  if (!total) {
-    alist.innerHTML = `<div class="loading">${view.q ? "No album matches “" + view.q.replace(/[<&]/g, "") + "”." : "No albums here."}</div>`;
-  }
-  $("#btn-more").hidden = loaded >= total;
-  $("#list-count").textContent = nAlbums(total);
+  alist.append(space);
+  alist.scrollTop = 0;
+  setTotal(d.total);
+  render();
 }
 
-async function more() {
-  const epoch = listEpoch;
-  const d = await query(loaded);
-  if (epoch !== listEpoch) return;
-  for (const a of d.albums) alist.append(makeAlbum(a));
-  loaded += d.albums.length;
-  total = d.total;
-  $("#btn-more").hidden = loaded >= total;
-}
-$("#btn-more").addEventListener("click", more);
-
-/* the rows on screen get fresh numbers without losing the scroll position */
+/* fresh numbers for the albums on screen, keeping the scroll position */
 async function refreshList() {
-  if (!loaded) return reload();
-  const epoch = listEpoch;
-  const p = new URLSearchParams({ platform: view.platform, q: view.q, type: view.type, show: view.show,
-    sort: view.sort, dir: view.dir, offset: 0, limit: Math.min(1000, Math.max(PAGE, loaded)) });
-  let d;
-  try { d = await api("/api/albums?" + p); } catch (e) { return; }
-  if (epoch !== listEpoch || selPending) return;
-  const els = new Map([...alist.children].filter((c) => c._a).map((c) => [c.dataset.slug, c]));
-  const same = d.albums.length === els.size && d.albums.every((a) => els.has(a.slug));
-  if (!same) return reload();
-  for (const a of d.albums) fillAlbum(els.get(a.slug), a);
-  total = d.total;
-  $("#list-count").textContent = nAlbums(total);
+  if (!slices.size) return reload();
+  const epoch = listEpoch;           // a reload meanwhile wins
+  const first = Math.floor(alist.scrollTop / ROW);
+  const near = new Set([Math.floor(first / PAGE), Math.floor((first + alist.clientHeight / ROW) / PAGE)]);
+  const fresh = new Map();
+  try {
+    for (const n of near) fresh.set(n, (await query(n * PAGE)).albums);
+    const d = await query(0, 1);
+    if (epoch !== listEpoch || selPending) return;
+    slices = fresh;
+    setTotal(d.total);
+  } catch (e) { return; }
+  for (const el of rows.values()) el._a = null;      // refill every row from the fresh data
+  render();
 }
 
 function showHead() {
@@ -264,7 +333,7 @@ $("#search").addEventListener("input", () => {
     reload();
   }, 250);
 });
-$("#f-type").addEventListener("change", (e) => { view.type = e.target.value; saveView(); reload(); });
+$("#f-type").addEventListener("change", (e) => { view.type = e.target.value; saveView(); loadPlatforms(); reload(); });
 $("#f-show").addEventListener("change", (e) => { view.show = e.target.value; saveView(); reload(); });
 
 /* ---------------------------------------------------------------- album dialog */

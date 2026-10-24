@@ -23,7 +23,8 @@ and console, and PUID/PGID/UMASK plus `/config` and `/data` in Docker.
 ```
 src/khinsider_sync/
   __main__.py   options / env vars (KHINSIDER_DATA, _CONFIG, _HOST, _PORT, _PASSWORD, _DATA_LOCKED)
-  web.py        FastAPI routes (status, platforms, albums, album, select, scan, read, sync, settings ...)
+  web.py        FastAPI routes (status, platforms, albums, album, select, scan, read, sync, settings ...);
+                /api/albums slices a cached view (album_view) - the page's list scrolls through all of it
   engine.py     one job at a time (scan | read | sync | scan+sync), Resolver, where albums go
                 (album_dir), moving saved files, progress, LogBuffer, scheduler
   catalog.py    SQLite <config>/catalog.db: albums, platforms, files, selection, settings, scans,

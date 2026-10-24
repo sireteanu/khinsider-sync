@@ -103,7 +103,9 @@ def create_app(engine_factory, password: Optional[str] = None, on_restart=None, 
 
     # ---------------------------------------------------------------- browsing
     @app.get("/api/platforms")
-    async def platforms():
+    async def platforms(type: str = ""):
+        """Platforms with their album counts - of one album type when `type` is given, so the
+        list matches what the album filter shows."""
         e = eng()
         s = e.catalog.settings()
         rules = e.catalog.rules()
@@ -112,26 +114,29 @@ def create_app(engine_factory, password: Optional[str] = None, on_restart=None, 
         kinds = collections.Counter()
         none = 0
         for _slug, plats, kind in e.catalog.index():
-            count.update(plats)
             kinds[kind or "Other"] += 1
+            if type and kind != type:
+                continue
+            count.update(plats)
             none += not plats
         names = e.catalog.platform_names()
         out = [{"slug": p, "name": names.get(p, p), "albums": count.get(p, 0), "state": states.get(p, "off")}
                for p in names if count.get(p, 0) or states.get(p)]
         out.sort(key=lambda x: x["name"].casefold())
+        total = sum(1 for _s, _p, k in e.catalog.index() if not type or k == type)
         return {"platforms": out, "types": sorted(kinds.items(), key=lambda kv: -kv[1]),
-                "no_platform": none, "platform_types": s.get("platform_types") or []}
+                "no_platform": none, "total": total, "platform_types": s.get("platform_types") or []}
 
-    @app.get("/api/albums")
-    async def albums(platform: str = "", q: str = "", type: str = "", show: str = "all", sort: str = "name",
-                     dir: int = 1, offset: int = 0, limit: int = 200):
-        e = eng()
-        if sort not in SORTS:
-            raise HTTPException(400, "sort must be one of " + ", ".join(SORTS))
-        if show == "synced":                     # the name before 1.0.2
-            show = "downloaded"
-        if show not in SHOWS:
-            raise HTTPException(400, "show must be one of " + ", ".join(SHOWS))
+    # the page scrolls through every album of a view, asking for a slice at a time: the view's
+    # filtered and sorted list is kept for the next slices until anything in the catalog changes
+    views: "collections.OrderedDict[tuple, list]" = collections.OrderedDict()
+
+    def album_view(e: Engine, key: tuple, platform, q, type, show, sort, dir) -> list:
+        """Album dicts of one view, filtered and sorted (cached)."""
+        hit = views.get(key)
+        if hit is not None:
+            views.move_to_end(key)
+            return hit
         s = e.catalog.settings()
         rules = e.catalog.rules()
         selected = set(e.catalog.selected_albums(rules, s.get("platform_types") or []))
@@ -155,32 +160,58 @@ def create_app(engine_factory, password: Optional[str] = None, on_restart=None, 
             items = [a for a in items if a["slug"] in selected]
         elif show == "unread":
             items = [a for a in items if a["slug"] in selected and not a["read"]]
-        names = e.catalog.platform_names()
-        out = [album_json(e, a, rules, selected, s, names) for a in items]
-        if show == "downloaded":
-            out = [a for a in out if a["downloaded"]]
-        elif show == "partly":
-            out = [a for a in out if a["synced"] and not a["downloaded"]]
-        elif show == "notdownloaded":
-            out = [a for a in out if not a["downloaded"]]
-        elif show == "failed":
-            out = [a for a in out if a["failed"] or a["error"]]
-        key = {"name": lambda a: (a["name"].casefold(), a["slug"]),
-               "year": lambda a: (a["year"] or "0000", a["name"].casefold()),
-               "added": lambda a: (a["added"] or "0000", a["name"].casefold()),
-               "new": lambda a: (a.get("_first") or 0, a["name"].casefold()),
-               "size": lambda a: (a["bytes"], a["name"].casefold()),
-               "synced": lambda a: (a["synced_bytes"] / (a["bytes"] or 1) if a["files"] else -1, a["name"].casefold()),
-               }[sort]
-        if sort == "new":
-            first = {a["slug"]: a["first_seen"] or 0 for a in items}
-            for a in out:
-                a["_first"] = first.get(a["slug"], 0)
-        out.sort(key=key, reverse=dir < 0)
-        for a in out:
-            a.pop("_first", None)
+        # sizes and download state only where the filter or the sort needs them (they cost time
+        # for 100,000 albums); otherwise only for the albums sent
+        if show in ("downloaded", "partly", "notdownloaded", "failed") or sort in ("size", "synced"):
+            for a in items:
+                a["_t"] = e.catalog.album_totals(a["slug"], a["formats"], s) if a["read"] else None
+            t = lambda a: a["_t"] or {"files": 0, "bytes": 0, "synced": 0, "synced_bytes": 0,  # noqa: E731
+                                      "failed": 0, "downloaded": False}
+            if show == "downloaded":
+                items = [a for a in items if t(a)["downloaded"]]
+            elif show == "partly":
+                items = [a for a in items if t(a)["synced"] and not t(a)["downloaded"]]
+            elif show == "notdownloaded":
+                items = [a for a in items if not t(a)["downloaded"]]
+            elif show == "failed":
+                items = [a for a in items if t(a)["failed"] or a["error"]]
+        else:
+            t = None
+        key_fn = {"name": lambda a: (a["name"].casefold(), a["slug"]),
+                  "year": lambda a: (a["year"] or "0000", a["name"].casefold()),
+                  "added": lambda a: (a["added"] or "0000", a["name"].casefold()),
+                  "new": lambda a: (a["first_seen"] or 0, a["name"].casefold()),
+                  "size": lambda a: (t(a)["bytes"], a["name"].casefold()),
+                  "synced": lambda a: (t(a)["synced_bytes"] / (t(a)["bytes"] or 1) if t(a)["files"] else -1,
+                                       a["name"].casefold()),
+                  }[sort]
+        items.sort(key=key_fn, reverse=dir < 0)
+        views[key] = items
+        while len(views) > 8:
+            views.popitem(last=False)
+        return items
+
+    @app.get("/api/albums")
+    async def albums(platform: str = "", q: str = "", type: str = "", show: str = "all", sort: str = "name",
+                     dir: int = 1, offset: int = 0, limit: int = 200):
+        e = eng()
+        if sort not in SORTS:
+            raise HTTPException(400, "sort must be one of " + ", ".join(SORTS))
+        if show == "synced":                     # the name before 1.0.2
+            show = "downloaded"
+        if show not in SHOWS:
+            raise HTTPException(400, "show must be one of " + ", ".join(SHOWS))
+        rules = e.catalog.rules()
+        s = e.catalog.settings()
+        key = (e.catalog.version, tuple(sorted(rules.items())), str(s.get("formats")), str(s.get("album_formats")),
+               bool(s.get("album_art")), tuple(s.get("platform_types") or ()), platform, q, type, show, sort, dir)
+        items = album_view(e, key, platform, q, type, show, sort, dir)
+        offset = max(0, offset)
         limit = max(1, min(1000, limit))
-        return {"total": len(out), "offset": offset, "albums": out[offset:offset + limit]}
+        selected = set(e.catalog.selected_albums(rules, s.get("platform_types") or []))
+        names = e.catalog.platform_names()
+        page = [album_json(e, a, rules, selected, s, names) for a in items[offset:offset + limit]]
+        return {"total": len(items), "offset": offset, "albums": page}
 
     @app.get("/api/album")
     async def album(slug: str):
