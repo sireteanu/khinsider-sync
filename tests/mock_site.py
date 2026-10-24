@@ -2,6 +2,9 @@
 (checked in a browser, October 2026; samples in tests/fixtures/):
 
   /console-list                                   platform list: <a href="/game-soundtracks/x">X</a> (12)<br>
+  /?page=N                                        home page: "Latest Soundtracks", newest first, one
+                                                  table.albumList per day under h3.latestSoundtrackHeading
+                                                  (LATEST_PAGE_SIZE albums a page; a day can span pages)
   /game-soundtracks/browse/<L>?page=N             table.albumList (cover | name | platforms | type | year),
                                                   .pagination .counter "Page N of M", "Found N albums!"
   /game-soundtracks/album/<slug>                  details <p align="left">, .albumImage links, table#songlist
@@ -32,6 +35,7 @@ Attributes you can change while a test runs:
   down        an HTTP status (e.g. 522): the whole site answers with it (None = up)
   down_after  set `down` to 522 once this many downloads have completed (None = never)
 Methods: modify(slug, file, grow) replaces a file; remove(slug) takes an album off the site;
+add_album(slug, name, **fields) puts a new album up (added today unless `added` is given);
 rename(old, new) moves an album to a new address (the old one redirects).
 """
 from __future__ import annotations
@@ -46,6 +50,7 @@ from email.utils import formatdate
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PAGE_SIZE = 2
+LATEST_PAGE_SIZE = 3
 LETTERS = ["0-9"] + [chr(c) for c in range(ord("A"), ord("Z") + 1)]
 SMALL = 30_000
 BIG = 2_000_000
@@ -208,7 +213,8 @@ class MockSite:
                         return self._send(200, site.track_page(slug, track))
                     return self._send(200, site.album_page(slug))
                 if path == "/":
-                    return self._send(200, page("Video Game Music", "<p>Total albums: 7</p>"))
+                    num = int((up.parse_qs(u.query).get("page") or ["1"])[0])
+                    return self._send(200, site.latest(num))
                 return self._send(404, page("Not found", "<h2>Ooops!</h2>"))
 
             def _limit_page(self):
@@ -359,6 +365,62 @@ class MockSite:
         rows = "".join(f'<a href="/game-soundtracks/{p}">{html.escape(n)}</a> ({counts[p]})<br> '
                        for p, n in sorted(PLATFORMS.items(), key=lambda kv: kv[1].casefold()))
         return page("Video Game Music", f"<h2>Consoles / Platforms</h2> {rows}")
+
+    def add_album(self, slug: str, name: str, **fields) -> None:
+        a = dict(name=name, platforms=["windows"], type="Gamerip", year="2026",
+                 added=time.strftime("%b %d, %Y").replace(" 0", " "), formats=["MP3"], cd=False, num=True,
+                 images=[], tracks=[("", "1", "01. New Track", "New Track", "1:00")])
+        a.update(fields)
+        self.albums[slug] = a
+
+    @staticmethod
+    def _row(slug: str, a: dict) -> str:
+        plats = ", ".join(f'<a href="/game-soundtracks/{p}">{html.escape(PLATFORMS[p])}</a>' for p in a["platforms"])
+        icon = (f'<img src="https://nu.example/soundtracks/{slug}/thumbs_small/cover.jpg">' if a["images"]
+                else '<div class="albumIconDefaultSmall"><i class="material-icons">audiotrack</i></div>')
+        return (f'<tr>   \n    <td class="albumIcon"><a href="/game-soundtracks/album/{slug}">{icon}</a></td>\n'
+                f'    <td>\n                <a href="/game-soundtracks/album/{slug}">{html.escape(a["name"])}</a>\n'
+                f'        </td>\n    <td>\n        {plats}    </td>\n    <td>{a["type"]}</td>\n'
+                f'    <td>{a["year"]}</td>\n</tr>\n')
+
+    def latest(self, num: int) -> str:
+        """The home page (markup: tests/fixtures/home_latest.html)."""
+        def day(a):
+            t = a["added"].replace("st,", ",").replace("nd,", ",").replace("rd,", ",").replace("th,", ",")
+            return time.strftime("%Y-%m-%d", time.strptime(t, "%b %d, %Y"))
+        albums = sorted(self.albums.items(), key=lambda sa: (day(sa[1]), sa[0]), reverse=True)
+        pages = max(1, -(-len(albums) // LATEST_PAGE_SIZE))
+        chunk = albums[(num - 1) * LATEST_PAGE_SIZE: num * LATEST_PAGE_SIZE]
+        head = ('<tr>                  \n    <th></th>\n    <th>        \n        <b>Album</b>    </th>\n'
+                '    <th><b>Platform</b></th>\n    <th><b>Type</b></th>    \n    <th><b>Year</b></th>    \n</tr>\n')
+        out, cur, rows = "", None, ""
+
+        def flush():
+            return (f'<h3 class="latestSoundtrackHeading">{heading(cur)}</h3><p><div class="albumListWrapper">\n'
+                    '    <div class="albumListSize">\n        <a href="?albumListSize=compact" class="albumListSizeIconCompact">'
+                    '<i class="material-icons">grid_on</i></a>\n    </div>\n    <div class="albumListDiv">\n'
+                    f'<table class="albumList">\n{head}{rows}</table>\n    </div>\n</div>\n\n')
+
+        def heading(d):
+            t = time.strptime(d, "%Y-%m-%d")
+            n = t.tm_mday
+            suffix = "th" if 10 <= n % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+            return f"{time.strftime('%B', t)} {n}{suffix}, {t.tm_year}"
+
+        for slug, a in chunk:
+            if day(a) != cur:
+                if cur is not None:
+                    out += flush()
+                cur, rows = day(a), ""
+            rows += self._row(slug, a)
+        if cur is not None:
+            out += flush()
+        pager = (f'<p></p>\n<div class="pagination">\n\t<p class="counter">\n\t\tPage {num} of {pages}\t</p>\n\t<ul>'
+                 + "".join(f'<li><a title="{i}" href="?page={i}" class="pagenav">{i}</a></li>' if i != num
+                           else f'<li><span class="pagenav">{i}</span></li>' for i in range(1, pages + 1))
+                 + "</ul>\n</div>")
+        return page("Video Game Music Downloads", '<h2>Latest Soundtracks <a href="/rss"><i class="material-icons" '
+                    f'style="font-size: 15px;">rss_feed</i></a></h2>\n{out}{pager}')
 
     def browse(self, letter: str, num: int) -> str:
         albums = sorted(((s, a) for s, a in self.albums.items() if letter_of(a["name"]) == letter),

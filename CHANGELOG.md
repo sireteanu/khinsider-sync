@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.0.5] - 2026-10-24
+
+### New
+- **Scan for new albums** (☰ menu) reads only khinsider's newest additions from its home page -
+  usually one page instead of about 230. Scheduled syncs do this between full scans, so new albums of
+  ticked platforms arrive without waiting for the next full scan.
+- **Sync now** in an album's window syncs just that album.
+- **Replace old formats** (Settings): when you change the formats, each ticked album's old files are
+  deleted once its new ones have all arrived - move a whole collection from MP3 to FLAC.
+- Optional playlist (`Album.m3u8`) and `folder.jpg` in each downloaded album's folder.
+- **Before a scheduled sync, check the download folder**: never (default - the disks stay asleep),
+  daily, weekly or monthly.
+
+### Improved
+- Check download folder and Check files also find files that were cut short.
+- The type filter button shows how many albums the list holds; the "Sync every album of …" line says
+  which album types a ticked platform brings in.
+
+### Fixed
+- An album khinsider moves to a new address keeps its Saved as, its own formats and a waiting upgrade.
+
 ## [1.0.4] - 2026-10-24
 
 ### New

@@ -210,6 +210,52 @@ class Scanner:
         return {"pages": self.pages, "albums": self.albums, "new": self.new, "errors": self.errors,
                 "removed": len(gone), "status": status, "named": named}
 
+    # ------------------------------------------------------------------ only what's new
+    async def scan_latest(self, name_of: Callable[[str, str], str], since: str, max_pages: int = 30) -> dict:
+        """Read the home page's "Latest Soundtracks" (newest first, /?page=N) back to the day
+        `since` ("YYYY-MM-DD"): usually one page instead of a full scan's ~230. Adds new albums and
+        updates listed ones; removes nothing. status "incomplete" when it couldn't reach `since`
+        within max_pages (a full scan is needed then)."""
+        self._start("latest")
+        scan_id = self.catalog.start_scan("quick")
+        log.info("Reading khinsider's newest albums (back to %s)", since)
+        status, oldest, page, pages = "incomplete", None, 0, 1
+        while page < min(pages, max_pages) and not self.stopping:
+            page += 1
+            self.current = f"newest albums, page {page}"
+            self.total = page
+            try:
+                _, body = await self._fetch(self.base if page == 1 else f"{self.base}?page={page}")
+            except FetchError as e:
+                self.errors += 1
+                log.warning("could not read the newest albums (page %d: %s)", page, e)
+                break
+            days, pages = parse.parse_latest(body or b"")
+            self.pages += 1
+            if not days:
+                log.warning("the home page lists no newest albums - has khinsider changed? (page %d)", page)
+                break
+            rows = [a for _d, albums in days for a in albums]
+            by_letter: dict = {}
+            for a in rows:
+                by_letter.setdefault(parse.letter_of(a["name"]), []).append(a)
+            for letter, albums in by_letter.items():
+                self.new += self.catalog.add_albums(albums, letter, scan_id)
+            self.albums += len(rows)
+            oldest = min(d for d, _ in days)
+            if oldest < since or page >= pages:
+                status = "done"
+                break
+        if self.stopping:
+            status = "stopped"
+        named = self.catalog.assign_folders(name_of)
+        self.catalog.finish_scan(scan_id, self.pages, self.albums, status)
+        log.info("Newest albums %s: %d pages, %d albums listed, %d new%s", status, self.pages, self.albums, self.new,
+                 f" - not back to {since} after {self.pages} pages: a full scan is needed"
+                 if status == "incomplete" and not self.errors else "")
+        return {"pages": self.pages, "albums": self.albums, "new": self.new, "errors": self.errors,
+                "status": status, "named": named, "oldest": oldest}
+
     async def _follow_moved(self, scan_id: int) -> None:
         """Albums you downloaded that the lists no longer show may have moved to a new address
         (their page redirects there): their ticks and folder follow them instead of the album

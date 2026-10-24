@@ -54,6 +54,7 @@ def create_app(engine_factory, password: Optional[str] = None, on_restart=None, 
     async def lifespan(app):
         engine = engine_factory()
         holder["engine"] = engine
+        app.state.engine = engine
         engine.scheduler = asyncio.create_task(engine.scheduler_loop())
         try:
             yield
@@ -308,8 +309,9 @@ def create_app(engine_factory, password: Optional[str] = None, on_restart=None, 
 
     # ---------------------------------------------------------------- jobs
     @app.post("/api/scan")
-    async def scan():
-        if not eng().start("scan"):
+    async def scan(quick: bool = Body(False, embed=True)):
+        """Read khinsider's album lists: all of them, or (quick) only the newest albums."""
+        if not eng().start("quick" if quick else "scan"):
             raise HTTPException(409, "already busy")
         return {"ok": True}
 
@@ -325,8 +327,21 @@ def create_app(engine_factory, password: Optional[str] = None, on_restart=None, 
         return {"ok": True}
 
     @app.post("/api/sync")
-    async def sync():
-        if not eng().start("sync"):
+    async def sync(albums: list = Body(None, embed=True)):
+        """Sync every ticked album, or only the given ones (they are ticked if they aren't)."""
+        e = eng()
+        slugs = [str(a) for a in albums] if albums else None
+        if slugs:
+            if e.busy:
+                raise HTTPException(409, "already busy")
+            for slug in slugs:
+                if e.catalog.album(slug) is None:
+                    raise HTTPException(404, f"no such album: {slug}")
+            chosen = set(e.catalog.selected_albums())
+            for slug in slugs:
+                if slug not in chosen:
+                    e.catalog.select(ALBUM + slug, True)
+        if not e.start("sync", slugs):
             raise HTTPException(409, "already busy")
         return {"ok": True}
 
@@ -377,7 +392,7 @@ def create_app(engine_factory, password: Optional[str] = None, on_restart=None, 
         e = eng()
         if kind not in SYNC_KINDS:
             raise HTTPException(400, "kind must be one of " + ", ".join(SYNC_KINDS))
-        job = e.job if e.job and e.job.get("kind") in ("sync", "scan+sync") else None
+        job = e.job if e.job and e.job.get("kind") in ("sync", "scan+sync", "quick+sync") else None
         if job is None:
             return {"total": 0, "files": [], "job": None}
         if kind == "uptodate":

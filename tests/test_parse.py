@@ -25,6 +25,20 @@ def test_browse_page():
     assert "animal-crossing-new-horizons-2020-switch-gamerip" not in {a["slug"] for a in albums}
 
 
+def test_home_page_latest_albums_by_day():
+    days, pages = parse.parse_latest(fixture("home_latest.html"))
+    assert pages == 617
+    assert [d for d, _ in days] == ["2026-10-24", "2026-10-23"]
+    first = days[0][1]
+    assert [a["slug"] for a in first] == ["crimson-desert-original-soundtrack-volume-one-2026",
+                                          "fate-strange-fake-original-soundtrack-2026"]
+    assert first[0]["name"] == "CRIMSON DESERT ORIGINAL SOUNDTRACK VOLUME ONE"
+    assert first[0]["platforms"] == [("playstation-5", "PS5"), ("windows", "Windows"),
+                                     ("xbox-series-x", "Xbox Series X/S")]
+    assert first[0]["type"] == "Soundtrack" and first[0]["year"] == "2026"
+    assert [a["slug"] for a in days[1][1]] == ["and-yet-it-moves-2011"]
+
+
 def test_album_page_with_cd_and_track_numbers():
     a = parse.parse_album(fixture("album_persona-5.html"), f"{SITE}/game-soundtracks/album/persona-5")
     assert not a["missing"] and a["slug"] == "persona-5"

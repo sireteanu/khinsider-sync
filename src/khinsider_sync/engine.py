@@ -91,6 +91,15 @@ def track_name(f: dict) -> str:
     return safe_segment(f"{number} - {title}{f['ext']}")
 
 
+def file_intact(root: str, rel: str, size: Optional[int]) -> bool:
+    """Is a downloaded file still in the folder, with the size it was saved with (when known)?"""
+    try:
+        st = os.stat(os.path.join(root, *rel.split("/")))
+    except OSError:
+        return False
+    return st.st_size == size if size else True
+
+
 def clean_place(value) -> str:
     """A "Saved as" folder typed in the page -> 'Folder/Sub' ('' = where it goes by default).
     Each part is made safe for Windows, macOS and Linux; '..' is refused."""
@@ -336,14 +345,15 @@ class Engine:
                 continue
             if k == "data_dir" and self.data_locked:
                 continue
-            if k in ("interrupted_job", "album_places", "album_formats", "album_upgrades"):
+            if k in ("interrupted_job", "album_places", "album_formats", "album_upgrades", "last_folder_check"):
                 continue
-            if k in ("parallel_max", "sync_every_hours", "full_scan_every_days"):
+            if k in ("parallel_max", "sync_every_hours", "full_scan_every_days", "check_folder_days"):
                 v = max(0, int(float(v or 0)))
             if k == "outage_wait_hours":
                 v = max(0.0, float(v or 0))
                 v = int(v) if v == int(v) else v
-            if k in ("resume_interrupted", "album_art", "art_folder", "impersonate"):
+            if k in ("resume_interrupted", "album_art", "art_folder", "impersonate", "replace_formats",
+                     "playlists", "folder_art"):
                 v = bool(v)
             if k == "track_names" and v not in ("site", "numbered"):
                 raise ValueError("track names must be site or numbered")
@@ -388,18 +398,21 @@ class Engine:
 
     def start(self, kind: str, albums: Optional[list] = None, scheduled: bool = False) -> bool:
         """kind: scan (the album lists) | read (album pages: `albums`, or the ticked ones) |
-        sync | scan+sync | check (the download folder, for downloaded files deleted since)."""
+        sync (`albums`: only those, else every ticked one) | scan+sync | quick (only the newest albums,
+        from the home page; a full scan when that can't cover the time since the last scan) |
+        quick+sync | check (the download folder, for downloaded files deleted since)."""
         if self.busy:
             return False
         self.stop_requested = False
         self.job = {"kind": kind, "phase": "starting", "started": time.time(), "scheduled": scheduled,
                     "message": ""}
-        if kind in ("sync", "scan+sync"):
+        if kind in ("sync", "scan+sync", "quick+sync") and not albums:
             # remembered until the sync ends on its own or is stopped, so a sync cut off by a
             # crash, reboot or app restart carries on (and resumes its .part files) at next start
             self.catalog.save_settings({"interrupted_job": kind})
         what = {"scan": "scan of the album lists", "read": "reading album pages", "sync": "sync",
-                "scan+sync": "scan + sync", "check": "check of the download folder"}.get(kind, kind)
+                "scan+sync": "scan + sync", "check": "check of the download folder",
+                "quick": "scan for new albums", "quick+sync": "scan for new albums + sync"}.get(kind, kind)
         log.info("Starting %s (%s)", what, "scheduled" if scheduled else "requested")
         self.task = asyncio.create_task(self._run(kind, albums))
         return True
@@ -454,20 +467,36 @@ class Engine:
         started = time.time()
         summary: dict = {}
         try:
+            s = self.catalog.settings()
+            days = float(s.get("check_folder_days") or 0)
             if kind == "check":                  # only the disk: no requests
                 summary["check"] = await self._check_folder()
-            else:
+            elif self.job.get("scheduled") and days > 0 and time.time() - float(s.get("last_folder_check") or 0) >= days * 86400 - 3600:
+                log.info("Scheduled check of the download folder (every %g days) before the sync", days)
+                summary["check"] = await self._check_folder()
+            if kind != "check" and not self.stop_requested:
                 async with self._client() as client:
                     robots = await self._robots(client)
-                    if kind in ("scan", "scan+sync"):
+                    full = kind in ("scan", "scan+sync")
+                    if kind in ("quick", "quick+sync"):
+                        since = self.catalog.last_good_scan()
+                        if since is None:
+                            log.info("No finished scan yet - reading all of khinsider's album lists instead")
+                            full = True
+                        else:
+                            self.job["phase"] = "reading the newest albums"
+                            day = time.strftime("%Y-%m-%d", time.localtime(since - 2 * 86400))   # 2 days slack
+                            res = summary["scan"] = await self._scanner(client, robots).scan_latest(self.folder_name, day)
+                            full = res["status"] == "incomplete" and not res["errors"] and not self.stop_requested
+                    if full and not self.stop_requested:
                         self.job["phase"] = "reading the album lists"
                         summary["scan"] = await self._scanner(client, robots).scan_site(self.folder_name)
                     if kind == "read" and not self.stop_requested:
                         slugs = albums if albums else self.catalog.selected_albums()
                         self.job["phase"] = "reading album pages"
                         summary["read"] = await self._scanner(client, robots).read_albums(slugs)
-                    if kind in ("sync", "scan+sync") and not self.stop_requested:
-                        summary["sync"] = await self._sync(client, robots)
+                    if kind in ("sync", "scan+sync", "quick+sync") and not self.stop_requested:
+                        summary["sync"] = await self._sync(client, robots, albums if kind == "sync" else None)
             self.job["phase"] = "stopped" if self.stop_requested else "done"
         except Exception as e:
             log.exception("job failed: %r", e)
@@ -476,7 +505,7 @@ class Engine:
             summary["error"] = repr(e)
         finally:
             self.job["finished"] = time.time()
-            if kind in ("sync", "scan+sync") and not self.shutting_down:
+            if kind in ("sync", "scan+sync", "quick+sync") and not albums and not self.shutting_down:
                 self.catalog.save_settings({"interrupted_job": ""})
             self.catalog.add_history(kind, started, summary)
             self.catalog.prune_changes()
@@ -486,11 +515,13 @@ class Engine:
             self._sel_cache = None
             self._schedule_next()
 
-    async def _sync(self, client, robots) -> dict:
+    async def _sync(self, client, robots, only: Optional[list] = None) -> dict:
         s = self.catalog.settings()
         data_dir = s["data_dir"]
         os.makedirs(data_dir, exist_ok=True)
         slugs = self.catalog.selected_albums()
+        if only:
+            slugs = [a for a in only if a in set(slugs)]
         if not slugs:
             log.warning("Nothing is ticked - tick the albums or platforms you want, then sync.")
             return {"files": 0}
@@ -505,7 +536,7 @@ class Engine:
             if self.stop_requested:
                 return {}
             if res["renamed"]:
-                slugs = self.catalog.selected_albums()
+                slugs = [res["renamed"].get(a, a) for a in slugs]
             albums = self.catalog.albums_by_slug(slugs)
         self.scanner = None
         self.job["phase"] = "checking what needs downloading"
@@ -671,6 +702,7 @@ class Engine:
                 manifest.commit()
                 self.catalog.commit()
                 await self._finish_upgrades()
+                await self._write_extras()
                 await self._check_leftovers()
             best = self.gate.remembered_max()
             if best:
@@ -714,11 +746,10 @@ class Engine:
         if self.catalog.album(slug) is None:
             raise ValueError("no such album")
         root = self.data_dir
-        gone = self.catalog.forget_missing(
-            slug, lambda rel: os.path.isfile(os.path.join(root, *rel.split("/"))))
+        gone = self.catalog.forget_missing(slug, lambda rel, size: file_intact(root, rel, size))
         self._sel_cache = None
         if gone:
-            log.info("%d files of %s are missing from the download folder - the next sync gets them again",
+            log.info("%d files of %s are missing or cut short in the download folder - the next sync gets them again",
                      len(gone), slug)
         return {"slug": slug, "missing": gone}
 
@@ -732,25 +763,27 @@ class Engine:
 
         def look() -> list:
             gone = []
-            for url, rel, album, *_ in rows:
+            for url, rel, album, _ext, _kind, _size, saved in rows:
                 if self.stop_requested:
                     break
-                if not os.path.isfile(os.path.join(root, *rel.split("/"))):
+                if not file_intact(root, rel, saved):
                     gone.append((url, rel, album))
             return gone
 
         gone = await asyncio.to_thread(look)
+        if not self.stop_requested:
+            self.catalog.save_settings({"last_folder_check": time.time()})
         if gone:
             self.catalog.forget_local(u for u, _, _ in gone)
         albums = sorted({a for _, _, a in gone})
         self._sel_cache = None
-        self.job["message"] = (f"{len(gone):,} of {len(rows):,} downloaded files are missing ({len(albums):,} "
+        self.job["message"] = (f"{len(gone):,} of {len(rows):,} downloaded files are missing or cut short ({len(albums):,} "
                                f"{'album' if len(albums) == 1 else 'albums'}) - the next sync downloads them again"
                                if gone else f"all {len(rows):,} downloaded files are there")
         if self.stop_requested:
             log.info("Check of the download folder stopped")
         elif gone:
-            log.info("Check of the download folder: %d of %d downloaded files are missing (%d albums) - "
+            log.info("Check of the download folder: %d of %d downloaded files are missing or cut short (%d albums) - "
                      "the next sync downloads them again", len(gone), len(rows), len(albums))
             named = self.catalog.albums_by_slug(albums)
             for a in albums[:20]:
@@ -824,46 +857,100 @@ class Engine:
                  a["name"], fmt[1:].upper(), ", ".join(e[1:].upper() for e in ups[slug]["from"]))
         return {"slug": slug, "pending": ups[slug]}
 
-    async def _finish_upgrades(self) -> None:
-        """After a sync: albums whose upgrade is fully downloaded lose the files of their old format."""
-        from . import cleanup
-        s = self.catalog.settings()
-        ups = dict(s.get("album_upgrades") or {})
-        if not ups:
-            return
-        changed = False
-        for slug, u in list(ups.items()):
-            a = self.catalog.album(slug)
+    def _replacements(self, s: dict) -> dict:
+        """Albums whose old music format can go now -> {slug: (old formats, why, upgrade or None)}:
+        upgrades (upgrade_album) and, with `replace_formats`, every ticked album with saved music files
+        of formats it no longer syncs - in both cases only once every wanted file is downloaded."""
+        ups = s.get("album_upgrades") or {}
+        out = {}
+        stale: dict = {}
+        if s.get("replace_formats"):
+            selected = set(self.catalog.selected_albums(None, s.get("platform_types") or []))
+            for _url, _rel, slug, ext, kind, *_ in self.catalog.saved_files():
+                if kind != "art" and ext in AUDIO_EXTENSIONS and slug in selected:
+                    stale.setdefault(slug, set()).add(ext)
+        albums = self.catalog.albums_by_slug(set(stale) | set(ups))
+        for slug in set(stale) | set(ups):
+            a = albums.get(slug)
             if a is None:
-                ups.pop(slug)
-                changed = True
+                continue
+            want = album_wants(s, slug, a["formats"])
+            old = (stale.get(slug, set()) | set((ups.get(slug) or {}).get("from") or ())) - want
+            if not (old or slug in ups):
                 continue
             if not self.catalog.album_totals(slug, a["formats"], s)["downloaded"]:
                 continue
-            want = album_wants(s, slug, a["formats"])
-            old = set(u.get("from") or ()) - want
+            new = sorted((e for e in want if e != "art"), key=self._quality)
+            why = "Replaced by " + "/".join(e[1:].upper() for e in new) if new else "Format no longer synced"
+            out[slug] = (old, why, ups.get(slug))
+        return out
+
+    async def _finish_upgrades(self) -> None:
+        """After a sync: albums whose upgrade (or, with `replace_formats`, whose new formats) are fully
+        downloaded lose their music files of the old formats. Images are never touched here."""
+        from . import cleanup
+        s = self.catalog.settings()
+        ups = dict(s.get("album_upgrades") or {})
+        changed = False
+        for slug in [k for k in ups if self.catalog.album(k) is None]:
+            ups.pop(slug)
+            changed = True
+        todo = self._replacements(s)
+        names = self.catalog.albums_by_slug(todo)
+        for slug, (old, why, up) in sorted(todo.items()):
             files = [{"path": rel, "url": url, "size": size or 0, "reason": "replaced"}
-                     for url, rel, _al, ext, kind, size in self.catalog.saved_files(slug)
+                     for url, rel, _al, ext, kind, size, _n in self.catalog.saved_files(slug)
                      if kind != "art" and ext in old]
             res = await asyncio.to_thread(cleanup.delete, self.data_dir, files)
             gone = set(res["deleted"])
-            why = f"Replaced by {u['to'][1:].upper()}"
             for f in files:
                 if f["path"] in gone:
                     self.catalog.add_change(None, "deleted", f["path"], f["size"], why)
             self.catalog.forget_local([f["url"] for f in files if f["path"] in gone])
+            name = names[slug]["name"] if slug in names else slug
             if res["errors"]:
-                log.warning("Upgrade of %s: %d old files could not be deleted: %s", a["name"],
-                            len(res["errors"]), "; ".join(res["errors"][:5]))
+                log.warning("%s: %d old files could not be deleted: %s", name, len(res["errors"]),
+                            "; ".join(res["errors"][:5]))
                 continue                        # tried again after the next sync
-            log.info("Upgrade of %s done: %s - deleted %d %s files (%s)", a["name"], u["to"][1:].upper(),
-                     len(gone), "/".join(e[1:].upper() for e in sorted(old)) or "old", fmt_bytes(res["bytes"]))
-            ups.pop(slug)
-            changed = True
+            if files:
+                log.info("%s of %s: deleted %d %s files (%s)", "Upgrade" if up else "New format", name,
+                         len(gone), "/".join(e[1:].upper() for e in sorted(old)), fmt_bytes(res["bytes"]))
+            if up:
+                log.info("Upgrade of %s done: %s", name, up["to"][1:].upper())
+                ups.pop(slug, None)
+                changed = True
         if changed:
             self.catalog.save_settings({"album_upgrades": ups})
         self.catalog.commit()
         self._sel_cache = None
+
+    async def _write_extras(self) -> None:
+        """Playlists and folder images of the ticked, downloaded albums (extras.py). Never fails a sync."""
+        from . import extras
+        from .cleanup import remove_empty_dirs
+        try:
+            s = self.catalog.settings()
+            have = self.catalog.extras()
+            if not (s.get("playlists") or s.get("folder_art") or have):
+                return
+            selected = set(self.catalog.selected_albums(None, s.get("platform_types") or []))
+            albums = self.catalog.albums_by_slug(selected)
+            done = [a for a, d in albums.items()
+                    if d["read"] and self.catalog.album_totals(a, d["formats"], s)["downloaded"]]
+            want = extras.plan(self, s, done)
+            mode = int(parse_mode(s.get("file_mode", "")), 8) if parse_mode(s.get("file_mode", "")) else None
+            written, removed, dirs = await asyncio.to_thread(extras.apply, self.data_dir, want, have, selected, mode)
+            for rel, (album, kind, sig) in written.items():
+                self.catalog.set_extra(rel, album, kind, sig)
+            self.catalog.drop_extras(removed)
+            if dirs:
+                await asyncio.to_thread(remove_empty_dirs, self.data_dir, dirs)
+            if written or removed:
+                kinds = collections.Counter(want[r][1] for r in written)
+                log.info("Playlists and folder images: %d playlists and %d folder images written, %d removed",
+                         kinds.get("playlist", 0), kinds.get("folder_art", 0), len(removed))
+        except Exception as e:
+            log.warning("Could not write the playlists / folder images: %r", e)
 
     async def read_album_now(self, slug: str) -> dict:
         """Read one album's page right away (opening an album in the page), outside the job queue."""
@@ -908,6 +995,7 @@ class Engine:
                 self.catalog.add_change(None, "deleted", f["path"], f["size"], cleanup.REASONS[f["reason"]])
         self.catalog.commit()
         self.catalog.forget_local([f["url"] for f in files if f.get("url") and f["path"] in gone])
+        self.catalog.drop_extras([f["path"] for f in files if f.get("extra") and f["path"] in gone])
         log.info(cleanup.describe(res))
         await self.find_leftovers()
         return res
@@ -919,7 +1007,7 @@ class Engine:
         if hours <= 0:
             self.next_run = None
             return
-        last = next((h for h in self.catalog.history(50) if h["kind"] in ("sync", "scan+sync")), None)
+        last = next((h for h in self.catalog.history(50) if h["kind"] in ("sync", "scan+sync", "quick+sync")), None)
         base = last["finished"] if last and last.get("finished") else time.time()
         self.next_run = max(base + hours * 3600, time.time() + 60)
 
@@ -944,8 +1032,8 @@ class Engine:
                 days = float(s.get("full_scan_every_days") or 0)
                 full = self.catalog.last_scan("full")
                 need_full = days > 0 and (not full or time.time() - (full["finished"] or 0) > days * 86400)
-                log.info("Scheduled run: %s", "album list scan + sync" if need_full else "sync")
-                self.start("scan+sync" if need_full else "sync", scheduled=True)
+                log.info("Scheduled run: %s", "album list scan + sync" if need_full else "newest albums + sync")
+                self.start("scan+sync" if need_full else "quick+sync", scheduled=True)
 
     # ------------------------------------------------------------------ status for the UI
     def selection(self) -> dict:

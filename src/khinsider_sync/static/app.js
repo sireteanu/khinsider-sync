@@ -51,6 +51,7 @@ if (!Array.isArray(view.types)) view.types = [];
 const saveView = () => { try { localStorage.setItem("view", JSON.stringify(view)); } catch (e) {} };
 let platforms = [];                 // from /api/platforms
 let noPlatform = 0;
+let platformTypes = [];          // album types a ticked platform brings in (Settings; [] = all)
 let allCount = null;              // albums of the chosen type (all of them without a type)
 
 async function loadPlatforms() {
@@ -58,6 +59,7 @@ async function loadPlatforms() {
   platforms = d.platforms;
   noPlatform = d.no_platform;
   allCount = d.total;
+  platformTypes = d.platform_types || [];
   typeMenu(d.types);
   renderPlatforms();
   return d;
@@ -67,7 +69,9 @@ async function loadPlatforms() {
 let typeKinds = "";
 function typeText() {
   const t = view.types;
-  $("#f-type-text").textContent = !t.length ? "Every type" : t.length <= 2 ? t.join(", ") : `${t.length} types`;
+  const label = (x) => (x === "Other" ? "No type" : x);
+  $("#f-type-text").textContent = !t.length ? "Every type"
+    : (t.length <= 2 ? t.map(label).join(", ") : `${t.length} types`) + (listReady ? ` · ${num(total)}` : "");
   $("#f-type").classList.toggle("on", t.length > 0);
 }
 function typeMenu(kinds) {
@@ -132,7 +136,7 @@ function renderPlatforms() {
       tick.checked = p.state === "on";
       tick.indeterminate = p.state === "partial";
       tick.dataset.state = p.state;
-      tick.title = `Sync every ${p.name} album, including ones khinsider adds later`;
+      tick.title = `Sync every ${p.name} album, including ones khinsider adds later${bringsIn()}`;
       tick.setAttribute("aria-label", `Sync every ${p.name} album`);
       tick.addEventListener("change", (e) => tickPlatform(p, e.target.dataset.state === "partial" ? true : e.target.checked));
     }
@@ -247,8 +251,11 @@ function loadSlice(n) {
   slices.set(n, p);
 }
 
+let listReady = false;            // `total` belongs to the current view
 function setTotal(n) {
   total = n;
+  listReady = true;
+  typeText();
   space.style.height = total * ROW + "px";
   $("#list-count").textContent = nAlbums(total);
   const none = $(".loading", alist);
@@ -290,6 +297,7 @@ window.addEventListener("resize", render);
 
 async function reload() {
   const epoch = ++listEpoch;
+  listReady = false;
   showHead();
   let d;
   try { d = await query(0); } catch (e) { $("#list-count").textContent = "Could not load: " + e.message; return; }
@@ -322,6 +330,11 @@ async function refreshList() {
   render();
 }
 
+/* what ticking a platform brings in: Settings decides the types, not the type filter of the list */
+function bringsIn() {
+  if (platformTypes.length) return ` - only ${platformTypes.join(", ")} albums (Settings)`;
+  return view.types.length ? " - of every type: the type filter only narrows this list (Settings can limit it)" : "";
+}
 function showHead() {
   const p = platforms.find((x) => x.slug === view.platform);
   $("#list-title").textContent = view.platform === "" ? "All albums" : view.platform === "-" ? "Albums without a platform" : p ? p.name : view.platform;
@@ -329,6 +342,7 @@ function showHead() {
   wrap.hidden = !p;
   if (p) {
     $("#plat-tick-name").textContent = p.name;
+    $("#plat-tick-types").textContent = bringsIn();
     const t = $("#plat-tick");
     t.checked = p.state === "on";
     t.indeterminate = p.state === "partial";
@@ -411,6 +425,9 @@ function showAlbum(d) {
   };
   $("#al-site").href = d.page;
   $("#al-check").hidden = !a.synced;
+  const syncBtn = $("#al-sync");
+  syncBtn.hidden = !!a.missing || (a.downloaded && !(d.upgrade && d.upgrade.pending));
+  syncBtn.disabled = !!(lastStatus && lastStatus.busy);
   const fsel = $("#al-formats");
   const names = { mp3: "MP3", flac: "FLAC where offered", best: "best quality", all: "every format" };
   const describe = (v) => {
@@ -480,9 +497,7 @@ function showUpgrade(a, up) {
     const p = up.pending;
     text.innerHTML = `<b></b> `;
     text.firstChild.textContent = `Upgrading to ${FMT(p.to)}:`;
-    text.append(`the next sync downloads it, then deletes the ${list(p.from)} files of this album.`);
-    const now = btn("Sync now", "", async () => { now.disabled = true; await startJob("/api/sync"); });
-    now.disabled = !!(lastStatus && lastStatus.busy);
+    text.append(`the next sync (or Sync now above) downloads it, then deletes the ${list(p.from)} files of this album.`);
     btn("Cancel upgrade", "ghost", () => upgrade(a, ""));
   } else if (up && up.better.length) {
     text.textContent = `You have this album as ${list(up.have)}. khinsider also has it as ${list(up.better)}.`;
@@ -528,6 +543,13 @@ $("#al-check").addEventListener("click", async () => {
   } catch (e) { alert("Could not check the files: " + e.message); }
 });
 $("#al-close").addEventListener("click", () => $("#album-dlg").close());
+$("#al-sync").addEventListener("click", async () => {
+  if (!current) return;
+  const btn = $("#al-sync");
+  btn.disabled = true;
+  await startJob("/api/sync", { albums: [current] });
+  $("#al-sub").textContent = "Syncing this album - the Activity panel shows how it goes.";
+});
 async function savePlace() {
   const input = $("#al-place");
   try {
@@ -581,13 +603,14 @@ function renderStatus(st) {
   const syncing = st.sync && job && job.phase === "downloading" && busy && !st.sync.outage;
   const outage = busy && st.sync && st.sync.outage;
   pill.className = "pill " + (outage ? "warn" : busy ? "busy" : st.sync && st.sync.paused ? "warn" : "idle");
-  pill.textContent = outage ? "Waiting for site" : busy ? ({ scan: "Scanning", read: "Reading", check: "Checking" }[job.kind] || "Syncing") :
+  pill.textContent = outage ? "Waiting for site" : busy ? ({ scan: "Scanning", quick: "Scanning", read: "Reading", check: "Checking" }[job.kind] || "Syncing") :
     (st.sync && st.sync.paused ? "Paused" : "Idle");
   renderOutage(outage);
   const sel = st.selection;
   $("#btn-scan").disabled = busy;
   $("#btn-read").disabled = busy || !sel.albums;
   $("#btn-check").disabled = busy;
+  $("#btn-quick").disabled = busy;
   $("#btn-sync").disabled = busy || !sel.albums;
   $("#btn-sync").title = sel.albums ? "Download new, incomplete and changed files of the ticked albums"
     : "Tick the albums or platforms you want first";
@@ -615,7 +638,7 @@ function renderStatus(st) {
   const line = $("#job-line");
   if (job) {
     const what = { scan: "Scan", read: "Reading album pages", sync: "Sync", "scan+sync": "Scan and sync",
-      check: "Check of the download folder" }[job.kind] || job.kind;
+      quick: "Scan for new albums", "quick+sync": "New albums and sync", check: "Check of the download folder" }[job.kind] || job.kind;
     line.textContent = busy
       ? `${what}: ${outage ? "waiting for khinsider" : job.phase} - started ${clock(job.started)}`
       : `Last ${what.toLowerCase()} ${job.phase === "done" ? "finished" : job.phase} at ${clock(job.finished || job.started)}`
@@ -625,8 +648,8 @@ function renderStatus(st) {
   const sc = $("#scan-stats");
   if (st.scan && busy) {
     const s = st.scan;
-    const pairs = s.what === "site"
-      ? [["Pages read", `${num(s.pages)}${s.total ? " of " + num(s.total + 1) : ""}`], ["Albums found", num(s.albums)],
+    const pairs = s.what === "site" || s.what === "latest"
+      ? [["Pages read", `${num(s.pages)}${s.total && s.what === "site" ? " of " + num(s.total + 1) : ""}`], ["Albums found", num(s.albums)],
          ["New albums", num(s.new)], ["Failed pages", num(s.errors), s.errors ? "bad" : ""]]
       : [["Album pages", `${num(s.read)} of ${num(s.total)}`], ["Files found", num(s.files)],
          ["Failed", num(s.errors), s.errors ? "bad" : ""], ["Waiting", num(s.queued)]];
@@ -786,6 +809,7 @@ $("#btn-sync").addEventListener("click", () => startJob("/api/sync"));
 $("#btn-stop").addEventListener("click", () => startJob("/api/stop"));
 $("#btn-read").addEventListener("click", () => startJob("/api/read", {}));
 $("#btn-check").addEventListener("click", () => startJob("/api/check", {}));
+$("#btn-quick").addEventListener("click", () => startJob("/api/scan", { quick: true }));
 $("#btn-clear-sel").addEventListener("click", async () => {
   if (!confirm("Untick every album and platform? Files already downloaded stay where they are.")) return;
   await api("/api/selection/clear", { method: "POST" });
@@ -889,6 +913,9 @@ $("#btn-settings").addEventListener("click", async () => {
   renderFmt();
   form.folder_layout.value = s.folder_layout || "album";
   form.art_folder.checked = !!s.art_folder;
+  form.replace_formats.checked = !!s.replace_formats;
+  form.playlists.checked = !!s.playlists;
+  form.folder_art.checked = !!s.folder_art;
   form.track_names.value = s.track_names || "site";
   form.impersonate.checked = s.impersonate !== false;
   const box = $("#types-list");
@@ -912,6 +939,11 @@ $("#btn-settings").addEventListener("click", async () => {
   form.file_mode.value = s.file_mode || "";
   form.sync_every_hours.value = s.sync_every_hours;
   form.full_scan_every_days.value = s.full_scan_every_days;
+  const cd = String(s.check_folder_days || 0);
+  if (![...form.check_folder_days.options].some((o) => o.value === cd)) {
+    const o = document.createElement("option"); o.value = cd; o.textContent = `Every ${cd} days`; form.check_folder_days.append(o);
+  }
+  form.check_folder_days.value = cd;
   form.outage_wait_hours.value = s.outage_wait_hours ?? 12;
   form.resume_interrupted.checked = s.resume_interrupted !== false;
   $("#settings-error").hidden = true;
@@ -925,6 +957,9 @@ $("#settings-save").addEventListener("click", async (e) => {
   const body = {
     folder_layout: form.folder_layout.value,
     art_folder: form.art_folder.checked,
+    replace_formats: form.replace_formats.checked,
+    playlists: form.playlists.checked,
+    folder_art: form.folder_art.checked,
     track_names: form.track_names.value,
     impersonate: form.impersonate.checked,
     platform_types: [...document.querySelectorAll("#types-list input:checked")].map((i) => i.value),
@@ -934,6 +969,7 @@ $("#settings-save").addEventListener("click", async (e) => {
     file_mode: form.file_mode.value.trim(),
     sync_every_hours: form.sync_every_hours.value || 0,
     full_scan_every_days: form.full_scan_every_days.value || 0,
+    check_folder_days: form.check_folder_days.value || 0,
     outage_wait_hours: form.outage_wait_hours.value || 0,
     resume_interrupted: form.resume_interrupted.checked,
   };

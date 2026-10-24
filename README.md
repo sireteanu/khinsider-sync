@@ -44,7 +44,7 @@ modest, don't sync the whole site, and consider [donating](https://downloads.khi
 
 | Area | What it does |
 |---|---|
-| Catalog | **Scan site** reads khinsider's album lists (about 230 pages for 106,000+ albums: name, platforms, type, year) and its platform list. No album pages and no music are requested while scanning. |
+| Catalog | **Scan site** reads khinsider's album lists (about 230 pages for 106,000+ albums: name, platforms, type, year) and its platform list. No album pages and no music are requested while scanning. **Scan for new albums** (☰ menu, and every scheduled sync between full scans) reads only the home page's newest additions - usually one page. |
 | Browsing | Platforms on the left with album counts (of the chosen album type when the type filter is set); the album list - every album of the view in one scrolling list, fetched a slice at a time as you scroll - with search, type filter (tick one or several: Gamerip, Soundtrack, Arrangement …; "No type" for albums without one), "Ticked / With synced files / With problems" filters, and sorting by name, year, size or how much is synced. |
 | Selection | Tick an album, or tick a platform for **every album of it, including ones added later** (optionally only some album types, e.g. gamerips). Untick single albums of a ticked platform as exceptions. Ticks are saved immediately. |
 | Album details | Click an album: its tracks per disc with every format and size, its images, what is synced, where it is saved. The album's page is read the first time you open it. |
@@ -54,7 +54,9 @@ modest, don't sync the whole site, and consider [donating](https://downloads.khi
 | Folders | One folder per album, named after the album (clashing names get the type and year added). Optionally grouped by platform, type or year. **Saved as** puts one album anywhere you like. Changing either **moves** what you already have instead of downloading it again. |
 | Sync | Reads each ticked album's page once (the first time it's synced or opened), then downloads what's missing or half-finished (`.part`, resumed). khinsider doesn't change albums once they're up, so **an album that is downloaded is done**: later syncs skip it without a request or a look at the disk. |
 | Downloaded albums | The album list marks every album as **Downloaded** or **Partly downloaded** (with the date in its tooltip and window), the filter shows Downloaded / Partly downloaded / Not downloaded, and the top strip counts "12 of 13 albums downloaded". **Check files** in an album's window looks for files you deleted; **Check download folder** (☰ menu) does that for every downloaded album at once - disk only, no requests. The next sync downloads the missing files again. |
-| Upgrading | An album's window offers **Upgrade to FLAC** (or another format the album has that is better than what you downloaded: FLAC, WAV, APE, WV, M4A, OPUS, OGG, AAC, MP3). The album gets that format as its own formats and is ticked; once a sync has every new file, it deletes the album's files of the old format (images stay) and logs them in the Activity log as "Replaced by FLAC". Until then the old files stay and Clean up leaves them alone. **Cancel upgrade** puts the album's formats back. |
+| Upgrading | An album's window offers **Upgrade to FLAC** (or another format the album has that is better than what you downloaded: FLAC, WAV, APE, WV, M4A, OPUS, OGG, AAC, MP3). The album gets that format as its own formats and is ticked; once a sync has every new file, it deletes the album's files of the old format (images stay) and logs them in the Activity log as "Replaced by FLAC". Until then the old files stay and Clean up leaves them alone. **Cancel upgrade** puts the album's formats back. **Replace old formats** (Settings) does the same for every ticked album whenever the formats setting changes - switch to FLAC and the MP3s go once the FLACs are in. |
+| One album now | **Sync now** in an album's window syncs just that album (and ticks it). |
+| Playlists and covers | Optional: `<album>.m3u8` (track order, lengths, titles) and `folder.jpg` (a copy of the cover) in each downloaded album's folder, for Plex, Jellyfin, Kodi and players. They move with the album, go when turned off, and Clean up lists them with an unticked album's music. A `folder.jpg` of your own is never replaced. |
 | Dates | Each saved file gets the album's "Date Added" (12:00 local time); folders get the date of their newest file. |
 | Renamed albums | When khinsider moves an album to a new address, its tick, Saved as and folder follow it. |
 | Permissions | Downloaded files and new folders get mode **777** by default (setting). |
@@ -64,7 +66,7 @@ modest, don't sync the whole site, and consider [donating](https://downloads.khi
 | Progress | Activity panel (counts, speed, parallel downloads; click New, Updated, Resumed, Up to date or Failed to see those files), **This sync** box (size, files left, time remaining), **Downloading** box (one progress bar per file), live log. |
 | Activity log | Every file added, updated, resumed, deleted or failed, by day, kept for a year. |
 | Clean up | Lists files that aren't part of the sync any more (removed from their album, in albums you unticked, formats or images you no longer sync, unneeded `.part` files). Only files Khinsider Sync downloaded or knows are listed - other music in the folder is never touched. Nothing is deleted without confirming. |
-| Schedule | Optional automatic sync every N hours and a site scan every N days (finds new albums for ticked platforms). |
+| Schedule | Optional automatic sync every N hours: a full site scan every N days, otherwise a scan for new albums (one page), then the sync. Optionally a check of the download folder first (never, daily, weekly, monthly - off by default, as it wakes the disks). |
 | Reliability | A sync cut off by a restart, crash or reboot continues at the next start. Menu: **Restart** / **Shut down**. Starting a second copy just opens the running one. |
 | Interface | Dark (default) or light theme, works on a phone, optional password (HTTP Basic), no external resources. |
 
@@ -132,7 +134,12 @@ Catalog and settings live in `config\` next to `start.bat`; the log is `config\k
 - Each row gives the album's address (its slug), name, platforms, type and year. New albums get a
   folder name once (see [Folders](#folders)).
 - After a scan that read every page, albums you downloaded that the lists no longer show are looked
-  up once: if khinsider moved one to a new address, its tick and folder follow it.
+  up once: if khinsider moved one to a new address, its tick and folder follow it - and so do its
+  Saved as, its own formats and a waiting upgrade.
+- **Scan for new albums** reads the home page's "Latest Soundtracks" (`/?page=N`, newest first, one
+  table per day) back to two days before the last finished scan - usually one page. It adds and updates
+  albums but never removes any. Without a finished scan, or when 30 pages don't reach back far enough,
+  it does a full scan instead.
 - After a scan that read every page, albums the site no longer lists are removed from the catalog
   (your files stay; Clean up lists them). A scan with failed pages removes nothing.
 
@@ -231,8 +238,12 @@ doesn't change albums). For every file of the other ticked albums (formats as ab
   else gets through, downloads pause ("Paused: …") and stay queued for the next sync.
 - **Free space**: downloads pause before the disk would drop below "Keep free on disk".
 - **Interrupted syncs** continue at the next start (`interrupted_job`), resuming `.part` files.
-- **Schedule**: "Sync automatically every N hours"; it becomes a scan+sync when the last scan is
-  older than "Scan the site every N days".
+- **Schedule**: "Sync automatically every N hours"; it becomes a scan+sync when the last full scan is
+  older than "Scan the whole site every N days", otherwise a scan for new albums + sync. With "Before a
+  scheduled sync, check the download folder" (`check_folder_days`) set, a check of the download folder
+  runs first when the last one is that old.
+- **Check download folder** compares every downloaded file with the size it was saved with: missing or
+  cut-short files are marked not downloaded (a cut-short one resumes at the next sync).
 
 ### Clean up
 
@@ -268,6 +279,9 @@ Stored in the catalog (`settings` table); changed in the Settings dialog or `POS
 | `album_upgrades` | `{}` | Waiting upgrades: `{album slug: {to, from, formats, since}}` (`formats`: the album's formats before, put back by Cancel); changed only with `POST /api/album/upgrade` |
 | `track_names` | `site` | `site` (khinsider's file names) or `numbered` (`1-01 - Title.flac`) |
 | `art_folder` | `false` | Images in `<album>/Art/` |
+| `replace_formats` | `false` | Once a ticked album is downloaded in the formats now wanted, delete its music files of formats no longer wanted |
+| `playlists` | `false` | Write `<album folder>.m3u8` in each downloaded album's folder |
+| `folder_art` | `false` | Copy each downloaded album's cover to `folder.jpg` / `folder.png` |
 | `impersonate` | `true` | Look like Chrome (needs curl_cffi) |
 | `parallel` | `auto` | `auto` or a fixed number of parallel downloads |
 | `parallel_max` | `8` | Upper limit for `auto` |
@@ -275,7 +289,9 @@ Stored in the catalog (`settings` table); changed in the Settings dialog or `POS
 | `min_free` | `2G` | Pause downloads before free disk space drops below this |
 | `file_mode` | `777` | Permissions for downloaded files and new folders (octal; empty = system default) |
 | `sync_every_hours` | `0` | Automatic sync interval (0 = off) |
-| `full_scan_every_days` | `7` | With the schedule on: scan the site when the last scan is older |
+| `full_scan_every_days` | `7` | With the schedule on: scan the whole site when the last full scan is older (else only the newest albums) |
+| `check_folder_days` | `0` | With the schedule on: check the download folder before a scheduled sync when the last check is this many days old (0 = never) |
+| `last_folder_check` | `0` | When the download folder was last checked (set by the app) |
 | `resume_interrupted` | `true` | Continue an unfinished sync when the app starts |
 | `outage_wait_hours` | `12` | How long a sync waits for the site when it's down (0 = don't wait) |
 | `interrupted_job` | `""` | Internal: set while a sync runs |
@@ -330,7 +346,7 @@ All JSON; the page uses nothing else.
 | `POST /api/check` | Job: look on disk for every downloaded file; missing ones are marked not downloaded (409 when busy) |
 | `POST /api/select` `{key, include}` | Tick/untick: `a:<slug>` or `p:<platform>` |
 | `POST /api/selection/clear` | Untick everything |
-| `POST /api/scan` · `POST /api/read` `{albums?}` · `POST /api/sync` · `POST /api/stop` | Jobs (409 when busy); `read` without albums reads every ticked album's page |
+| `POST /api/scan` `{quick?}` · `POST /api/read` `{albums?}` · `POST /api/sync` `{albums?}` · `POST /api/stop` | Jobs (409 when busy); `scan` with `quick: true` reads only the newest albums; `read` without albums reads every ticked album's page; `sync` with albums syncs only those (ticking them) |
 | `GET/POST /api/settings` | Read / change settings (400 with a message on invalid values) |
 | `POST /api/album-formats` `{slug, formats}` | This album's own formats (`""` = the general setting); 400 on an unknown format |
 | `POST /api/album-place` `{slug, place}` | Saved as (`""` = default) -> `{slug, place, dir, moved}`; 400 on a bad place, 409 while busy |
@@ -349,11 +365,12 @@ All JSON; the page uses nothing else.
 src/khinsider_sync/
   __main__.py   options / env vars, port check, log file, uvicorn, restart / shutdown
   web.py        FastAPI routes and Basic auth
-  engine.py     jobs (scan | read | sync | scan+sync), Resolver (track page -> download address),
+  engine.py     jobs (scan | quick | read | sync | scan+sync | quick+sync | check), Resolver (track page -> download address),
                 album_dir() (where albums go), moving saved files, Clean up, schedule, status
   catalog.py    SQLite catalog; selection (select / selected_albums / platform_states); wanted_exts
-  scanner.py    scan_site() (platform list + browse pages), read_albums() (album pages)
-  parse.py      page readers: parse_browse, parse_album, parse_track, parse_platforms
+  scanner.py    scan_site() (platform list + browse pages), scan_latest() (home page), read_albums()
+  parse.py      page readers: parse_browse, parse_latest, parse_album, parse_track, parse_platforms
+  extras.py     playlists and folder images next to downloaded albums
   cleanup.py    Clean up: walk the download folder, judge files, delete confirmed ones
   static/       index.html, app.css, app.js - no build step, no CDN
   core/         the sync engine from Rom Sync (download.py with the `resolve` hook, sync.py, limits.py ...)
@@ -397,6 +414,9 @@ Verified in a browser (October 2026). If the site changes, these are the first t
   albums!". A "Top 12" grid above the list is not part of it. `0-9` also holds names starting with
   quotes and other symbols.
 - Platform list: `/console-list`, `<a href="/game-soundtracks/<slug>">Name</a> (count)`.
+- Home page (`/?page=N`, 617 pages): "Latest Soundtracks", newest first, 8 days a page (~235 albums),
+  each day an `h3.latestSoundtrackHeading` ("October 24th, 2026") followed by a `table.albumList` with
+  the browse pages' columns; a day can carry on at the top of the next page.
 - Album pages: details `<p align="left">` (Platforms, Year, Date Added `Dec 17th, 2025`, Album type);
   images `.albumImage a`; `table#songlist` with `#songlist_header` (optional `CD` and `#` columns,
   `Song Name` over two columns, one column per format) and `#songlist_footer`. Missing albums answer

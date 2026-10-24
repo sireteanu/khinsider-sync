@@ -20,6 +20,12 @@ from .core.constants import FORMAT_EXT, IMAGE_EXTENSIONS
 from .core.util import extension
 
 LETTERS = ["0-9"] + [chr(c) for c in range(ord("A"), ord("Z") + 1)]
+
+
+def letter_of(name: str) -> str:
+    """The browse page an album's name is listed under ("A".."Z", else "0-9")."""
+    c = (name or "")[:1].upper()
+    return c if "A" <= c <= "Z" else "0-9"
 ALBUM_PREFIX = "/game-soundtracks/album/"
 PLATFORM_PREFIX = "/game-soundtracks/"
 # links below /game-soundtracks/ that are not platforms
@@ -104,12 +110,9 @@ def parse_platforms(body: bytes) -> list:
 
 
 # --------------------------------------------------------------------------- browse pages
-def parse_browse(body: bytes) -> tuple:
-    """A browse page -> ([album dicts], pages, found). Album dict: slug, name, platforms
-    [(slug, name)], type, year. `pages`: how many pages this letter has; `found`: albums in it."""
-    tree = LexborHTMLParser(body)
+def _album_rows(table) -> list:
+    """The rows of a table.albumList (cover | name | platforms | type | year) -> album dicts."""
     albums = []
-    table = tree.css_first("table.albumList")
     if table is not None:
         for tr in table.css("tr"):
             tds = [c for c in tr.iter() if c.tag == "td"]
@@ -141,6 +144,10 @@ def parse_browse(body: bytes) -> tuple:
             year = _text(rest[2]) if len(rest) > 2 else ""
             albums.append({"slug": slug, "name": _text(link), "platforms": plats, "type": kind,
                            "year": year if re.fullmatch(r"\d{4}", year) else ""})
+    return albums
+
+
+def _pages(tree) -> int:
     pages = 1
     counter = tree.css_first(".pagination .counter")
     m = re.search(r"of\s+(\d+)", _text(counter)) if counter is not None else None
@@ -151,11 +158,46 @@ def parse_browse(body: bytes) -> tuple:
             n = re.search(r"[?&]page=(\d+)", a.attributes.get("href") or "")
             if n:
                 pages = max(pages, int(n.group(1)))
+    return pages
+
+
+def parse_browse(body: bytes) -> tuple:
+    """A browse page -> ([album dicts], pages, found). Album dict: slug, name, platforms
+    [(slug, name)], type, year. `pages`: how many pages this letter has; `found`: albums in it."""
+    tree = LexborHTMLParser(body)
+    albums = _album_rows(tree.css_first("table.albumList"))
+    pages = _pages(tree)
     found = None
     m = re.search(r"Found\s+([\d,]+)\s+albums", tree.body.text() if tree.body else "")
     if m:
         found = int(m.group(1).replace(",", ""))
     return albums, pages, found
+
+
+def parse_latest(body: bytes) -> tuple:
+    """The home page's "Latest Soundtracks" (/?page=N, newest first, one table.albumList per day
+    under h3.latestSoundtrackHeading "October 24th, 2026") -> ([(date "2026-10-24", [album dicts])], pages).
+    A day can carry on at the top of the next page."""
+    tree = LexborHTMLParser(body)
+    days = []
+    for h in tree.css("h3.latestSoundtrackHeading"):
+        date = parse_date(_text(h))
+        table = None
+        node = h.next
+        while node is not None:                  # the day's table follows its heading
+            if node.tag == "h3":
+                break
+            if node.tag == "table" and "albumList" in (node.attributes.get("class") or ""):
+                table = node
+                break
+            found = node.css_first("table.albumList") if node.tag not in ("-text", "-comment") else None
+            if found is not None:
+                table = found
+                break
+            node = node.next
+        if date:
+            days.append((date, _album_rows(table)))
+    return days, _pages(tree)
 
 
 # --------------------------------------------------------------------------- album pages

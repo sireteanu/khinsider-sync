@@ -8,8 +8,8 @@ A file on disk is a leftover when
   * "unticked" - the site still lists it, but its album isn't ticked any more, or its format (or the
                  album art) isn't synced;
   * "part"     - an unfinished download (.part) of a file that isn't wanted any more.
-The old format of an album waiting for its upgrade is not listed: the sync deletes it once the new
-one is in (Engine._finish_upgrades).
+The old format of an album waiting for its upgrade (or of any ticked album with "replace_formats")
+is not listed: the sync deletes it once the new one is in (Engine._finish_upgrades).
 Files Khinsider Sync didn't download and doesn't know are never listed - other music you keep in
 the same folder is safe. Nothing is deleted without an explicit list of paths, and only paths that
 are still leftovers when the delete runs are removed. Symlinks are never followed or deleted; the
@@ -95,11 +95,14 @@ def find(engine, settings: dict, disk: list) -> list:
             by_dir.setdefault(engine.album_dir(a, settings), []).append(slug)
     want_cache: dict = {}
     upgrading = {slug: set(u.get("from") or ()) for slug, u in (settings.get("album_upgrades") or {}).items()}
+    replacing = bool(settings.get("replace_formats"))
 
     def wanted(hit) -> bool:
         _url, album, ext, kind = hit
         if kind != "art" and ext in upgrading.get(album, ()):
             return True                                    # kept until its replacement is in
+        if replacing and kind != "art" and album in selected:
+            return True                                    # the sync replaces it (replace_formats)
         if album not in selected:
             return False
         if album not in want_cache:
@@ -115,9 +118,14 @@ def find(engine, settings: dict, disk: list) -> list:
             return all(albums[s]["read"] and not albums[s]["error"] for s in slugs)
         return full_done
 
+    made = catalog.extras()                   # playlists / folder images the app wrote (extras.py)
     out = []
     for d, name, size in disk:
         rel = f"{d}/{name}" if d else name
+        if rel in made:
+            if made[rel][0] not in selected:
+                out.append({"path": rel, "size": size, "reason": "unticked", "extra": True})
+            continue
         if not d and name.startswith(MANIFEST_NAME):
             continue
         if name.endswith(".part"):

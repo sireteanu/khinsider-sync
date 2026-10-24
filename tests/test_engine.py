@@ -142,16 +142,19 @@ def test_check_download_folder_finds_deleted_files_of_every_album(site, app_fact
     sync(c)
     os.remove(c.data / "Super Mario World" / "03. Overworld.mp3")
     os.remove(c.data / "PERSONA5 ORIGINAL SOUNDTRACK" / "Cover.jpg")
+    with open(c.data / "Super Mario World" / "02. Title Screen.mp3", "r+b") as f:   # cut short
+        f.truncate(1000)
     site.reset_log()
     assert c.post("/api/check").status_code == 200
     st = wait(c)
     assert not site.requests, "checking the folder only looks at the disk"
-    assert st["job"]["kind"] == "check" and "2 of 9 downloaded files are missing (2 albums)" in st["job"]["message"]
+    assert st["job"]["kind"] == "check" and "3 of 9 downloaded files are missing or cut short (2 albums)" in st["job"]["message"]
     assert not album(c, SMW)["album"]["downloaded"] and not album(c, "persona-5")["album"]["downloaded"]
     assert albums(c, show="partly").keys() == {SMW, "persona-5"}
     st = sync(c)
-    assert st["sync"]["new"] == 2
+    assert st["sync"]["new"] == 2 and st["sync"]["resumed"] == 1
     assert "Super Mario World/03. Overworld.mp3" in on_disk(c.data)
+    assert os.path.getsize(c.data / "Super Mario World" / "02. Title Screen.mp3") > 1000
     assert c.post("/api/check").status_code == 200
     assert "all 9 downloaded files are there" in wait(c)["job"]["message"]
 
@@ -195,6 +198,112 @@ def test_an_upgrade_can_be_cancelled_and_refuses_worse_formats(site, app_factory
     assert c2.post("/api/album/upgrade", json={"slug": SMW, "format": ""}).json()["pending"] is None
     d = album(c2, SMW)
     assert d["formats"] == "" and d["upgrade"]["pending"] is None and d["album"]["downloaded"]
+
+
+def test_sync_one_album_only(site, app_factory):
+    c = app_factory(site)
+    first_sync(c)
+    select(c, "a:persona-5")
+    assert c.post("/api/sync", json={"albums": ["sonic-the-hedgehog-genesis"]}).status_code == 200
+    st = wait(c)
+    assert st["sync"]["albums"] == 1 and st["sync"]["new"] == 1
+    files = on_disk(c.data)
+    assert "Sonic the Hedgehog/01. Green Hill Zone.mp3" in files, "synced and ticked"
+    assert not any(f.startswith("PERSONA5") for f in files), "other ticked albums wait for a full sync"
+    assert albums(c, show="ticked").keys() == {SMW, "persona-5", "sonic-the-hedgehog-genesis"}
+    assert c.post("/api/sync", json={"albums": ["nope"]}).status_code == 404
+
+
+def test_replace_old_formats_after_a_format_change(site, app_factory):
+    c = app_factory(site)
+    first_sync(c)
+    select(c, "a:" + BIRD)
+    sync(c)
+    r = c.post("/api/settings", json={"formats": "first:.flac,.mp3,art", "replace_formats": True})
+    assert r.status_code == 200 and r.json()["settings"]["replace_formats"] is True
+    assert c.get("/api/cleanup").json()["files"] == [], "the MP3s wait for their replacement"
+    st = sync(c)
+    files = on_disk(c.data)
+    assert {f for f in files if f.startswith("Super Mario World/")} == \
+        {p.replace(".mp3", ".flac") for p in SMW_MP3} | {"Super Mario World/Cover.jpg"}
+    assert "A Bird Story/A Bird Story (Piano).mp3" in files, "no FLAC on the site: its MP3s stay"
+    assert any("New format of Super Mario World: deleted 3 MP3 files" in m for m in log_lines(st))
+    deleted = c.get("/api/changes", params={"kind": "deleted"}).json()["files"]
+    assert len(deleted) == 3 and "Replaced by FLAC" in str(deleted)
+    assert st["leftovers"]["files"] == 0
+
+
+def test_without_replace_old_formats_the_old_ones_go_to_clean_up(site, app_factory):
+    c = app_factory(site)
+    first_sync(c)
+    c.post("/api/settings", json={"formats": "first:.flac,.mp3,art"})
+    st = sync(c)
+    assert SMW_MP3 <= on_disk(c.data)
+    assert st["leftovers"]["files"] == 3
+
+
+def scheduled_run(c, kind="quick+sync"):
+    """What the scheduler starts when a scheduled sync is due."""
+    e = c.app.state.engine
+    assert c.portal.call(lambda: e.start(kind, scheduled=True))
+    return wait(c)
+
+
+def test_scheduled_runs_check_the_folder_only_when_asked(site, app_factory):
+    c = app_factory(site)
+    first_sync(c)
+    os.remove(c.data / "Super Mario World" / "03. Overworld.mp3")
+    st = scheduled_run(c)
+    assert "check" not in str(st["job"]) and not any("Scheduled check" in m for m in log_lines(st))
+    assert "Super Mario World/03. Overworld.mp3" not in on_disk(c.data), "the disks were left alone"
+    assert c.post("/api/settings", json={"check_folder_days": 7}).status_code == 200
+    st = scheduled_run(c)
+    assert any("Scheduled check of the download folder" in m for m in log_lines(st))
+    assert "Super Mario World/03. Overworld.mp3" in on_disk(c.data), "found missing, downloaded again"
+    os.remove(c.data / "Super Mario World" / "03. Overworld.mp3")
+    st = scheduled_run(c)
+    assert "Super Mario World/03. Overworld.mp3" not in on_disk(c.data), "checked a week ago: not again yet"
+
+
+def test_playlists_and_folder_images(site, app_factory):
+    c = app_factory(site, settings={"playlists": True, "folder_art": True})
+    st = first_sync(c)
+    m3u = c.data / "Super Mario World" / "Super Mario World.m3u8"
+    assert m3u.read_text(encoding="utf-8").splitlines() == [
+        "#EXTM3U", "#PLAYLIST:Super Mario World",
+        "#EXTINF:2,Nintendo Logo", "01. Nintendo Logo.mp3",
+        "#EXTINF:46,Title Screen", "02. Title Screen.mp3",
+        "#EXTINF:167,Overworld", "03. Overworld.mp3"]
+    folder = c.data / "Super Mario World" / "folder.jpg"
+    assert folder.read_bytes() == (c.data / "Super Mario World" / "Cover.jpg").read_bytes()
+    assert any("1 playlists and 1 folder images written" in m for m in log_lines(st))
+    before = sum("folder images written" in m for m in log_lines(st))
+    st = sync(c)
+    assert sum("folder images written" in m for m in log_lines(st)) == before, "unchanged: not written again"
+    # a new folder layout moves them along with the music
+    c.post("/api/settings", json={"folder_layout": "platform"})
+    sync(c)
+    files = on_disk(c.data)
+    assert "SNES/Super Mario World/Super Mario World.m3u8" in files and "SNES/Super Mario World/folder.jpg" in files
+    assert not (c.data / "Super Mario World").exists()
+    # unticked: Clean up lists them with the music
+    select(c, "a:" + SMW, False)
+    left = {f["path"] for f in c.get("/api/cleanup").json()["files"]}
+    assert "SNES/Super Mario World/folder.jpg" in left and "SNES/Super Mario World/Super Mario World.m3u8" in left
+    r = c.post("/api/cleanup/delete", json={"paths": sorted(left), "confirm": True})
+    assert r.status_code == 200 and not (c.data / "SNES").exists()
+
+
+def test_folder_images_never_replace_your_own_and_go_when_turned_off(site, app_factory):
+    c = app_factory(site, settings={"folder_art": True, "playlists": True})
+    os.makedirs(c.data / "Super Mario World")
+    (c.data / "Super Mario World" / "folder.jpg").write_bytes(b"mine")
+    first_sync(c)
+    assert (c.data / "Super Mario World" / "folder.jpg").read_bytes() == b"mine"
+    c.post("/api/settings", json={"folder_art": False, "playlists": False})
+    sync(c)
+    assert not (c.data / "Super Mario World" / "Super Mario World.m3u8").exists()
+    assert (c.data / "Super Mario World" / "folder.jpg").read_bytes() == b"mine"
 
 
 def test_files_already_in_the_folder_are_adopted(site, app_factory):
@@ -291,6 +400,22 @@ def test_an_album_moved_to_a_new_address_keeps_its_tick_and_folder(site, app_fac
     assert st["sync"]["new"] == 0 and st["sync"]["up to date"] + st["sync"]["already in folder"] == 4
     assert not site.file_requests()
     assert on_disk(c.data) == SMW_MP3 | {"Super Mario World/Cover.jpg"}
+
+
+def test_a_moved_album_keeps_its_saved_as_and_own_formats(site, app_factory):
+    c = app_factory(site)
+    first_sync(c)
+    assert c.post("/api/album-place", json={"slug": SMW, "place": "Faves/SMW"}).status_code == 200
+    assert c.post("/api/album-formats", json={"slug": SMW, "formats": "first:.mp3,art"}).status_code == 200
+    sync(c)
+    site.rename(SMW, "super-mario-world-snes")
+    scan(c)
+    d = album(c, "super-mario-world-snes")
+    assert d["place"] == "Faves/SMW" and d["formats"] == "first:.mp3,art"
+    site.reset_log()
+    st = sync(c)
+    assert st["sync"]["new"] == 0 and not site.file_requests()
+    assert on_disk(c.data) == {p.replace("Super Mario World/", "Faves/SMW/") for p in SMW_MP3 | {"Super Mario World/Cover.jpg"}}
 
 
 def test_finds_and_remembers_the_servers_limit(site_factory, app_factory):

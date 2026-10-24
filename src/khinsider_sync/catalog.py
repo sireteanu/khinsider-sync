@@ -31,6 +31,10 @@ DEFAULT_SETTINGS = {
     "album_upgrades": {},           # {album slug: {to, from, formats, since}} - waiting upgrades (Engine.upgrade_album)
     "track_names": "site",          # site ("1-01. Title.mp3" as khinsider names it) | numbered ("1-01 - Title.mp3")
     "art_folder": False,            # images in an "Art" folder inside the album's folder
+    "playlists": False,             # write "<album>.m3u8" next to a downloaded album's music (extras.py)
+    "folder_art": False,            # copy a downloaded album's cover to folder.jpg / folder.png (extras.py)
+    "replace_formats": False,       # once a ticked album is downloaded in the formats now wanted, delete its
+                                    # music files of formats no longer wanted (Engine._finish_upgrades)
     "impersonate": True,            # requests look like Chrome (needs curl_cffi)
     "parallel": "auto",             # auto | number
     "parallel_max": 8,
@@ -41,7 +45,10 @@ DEFAULT_SETTINGS = {
     "interrupted_job": "",          # set while a sync runs; cleared when it ends normally
     "outage_wait_hours": 12,        # how long a sync waits for the site when it's down
     "sync_every_hours": 0,          # 0 = off
-    "full_scan_every_days": 7,      # with the schedule on: full scan when the last one is older
+    "full_scan_every_days": 7,      # with the schedule on: full scan when the last one is older (else only the newest albums)
+    "check_folder_days": 0,         # with the schedule on: check the download folder for deleted files before a
+                                    # scheduled sync when the last check is this many days old (0 = never: disks stay asleep)
+    "last_folder_check": 0,         # when the download folder was last checked (set by the app)
     "data_dir": "",                 # set at start-up from --data unless changed in the UI
 }
 
@@ -212,6 +219,7 @@ class Catalog:
                 path TEXT, size INTEGER, note TEXT);
             CREATE INDEX IF NOT EXISTS changes_day ON changes(day);
             CREATE INDEX IF NOT EXISTS changes_job ON changes(job, kind);
+            CREATE TABLE IF NOT EXISTS extras (rel TEXT PRIMARY KEY, album TEXT, kind TEXT, sig TEXT);
         """)
         self.db.commit()
         self._index: Optional[list] = None       # [(slug, (platforms), type)] for the selection
@@ -268,6 +276,12 @@ class Catalog:
         if not row:
             return None
         return dict(zip(("id", "kind", "root", "started", "finished", "pages", "files", "status"), row))
+
+    def last_good_scan(self) -> Optional[float]:
+        """When the last album-list scan (full or newest albums) that finished cleanly started."""
+        with self.lock:
+            row = self.db.execute("SELECT MAX(started) FROM scans WHERE kind IN ('full','quick') AND status='done'").fetchone()
+        return row[0] if row and row[0] else None
 
     def set_platforms(self, rows: Iterable[tuple]) -> None:
         """[(slug, name, albums)] from the site's platform list."""
@@ -451,6 +465,17 @@ class Catalog:
                 self.db.execute("DELETE FROM selection WHERE key=?", (ALBUM + old,))
                 self.db.execute("INSERT OR REPLACE INTO selection VALUES (?,?)", (ALBUM + new, inc[0]))
             self.db.commit()
+        # the album's own settings follow it too
+        s = self.settings()
+        moved = {}
+        for key in ("album_places", "album_formats", "album_upgrades"):
+            own = dict(s.get(key) or {})
+            if old in own:
+                own.setdefault(new, own[old])
+                del own[old]
+                moved[key] = own
+        if moved:
+            self.save_settings(moved)
         self.changed(albums=True)
 
     def remap(self, rel_of: Callable[[dict, dict], str]) -> int:
@@ -490,14 +515,14 @@ class Catalog:
                 out += self.db.execute(q, chunk).fetchall()
         return out
 
-    def forget_missing(self, slug: str, exists: Callable[[str], bool]) -> list:
-        """Check an album's saved files on disk: the ones gone are marked not downloaded, so the
-        next sync fetches them again. -> their paths."""
+    def forget_missing(self, slug: str, intact: Callable[[str, Optional[int]], bool]) -> list:
+        """Check an album's saved files on disk (`intact(rel, size when saved)`): the ones gone or
+        cut short are marked not downloaded, so the next sync fetches them again. -> their paths."""
         words = ",".join("'%s'" % w for w in SYNCED_WORDS)
         with self.lock:
-            rows = self.db.execute(f"SELECT url, rel FROM files WHERE album=? AND local IN ({words})",
+            rows = self.db.execute(f"SELECT url, rel, local_size FROM files WHERE album=? AND local IN ({words})",
                                    (slug,)).fetchall()
-        gone = [(u, r) for u, r in rows if not exists(r)]
+        gone = [(u, r) for u, r, n in rows if not intact(r, n)]
         if gone:
             with self.lock:
                 self.db.executemany("UPDATE files SET local=NULL, local_size=NULL WHERE url=?", [(u,) for u, _ in gone])
@@ -506,14 +531,30 @@ class Catalog:
         return [r for _, r in gone]
 
     def saved_files(self, album: Optional[str] = None) -> list:
-        """[(url, rel, album, ext, kind, size)] of the downloaded files (of one album, or all)."""
+        """[(url, rel, album, ext, kind, size, size when saved or None)] of the downloaded files
+        (of one album, or all)."""
         words = ",".join("'%s'" % w for w in SYNCED_WORDS)
-        q = (f"SELECT url, rel, album, ext, kind, COALESCE(local_size, bytes, 0) FROM files "
+        q = (f"SELECT url, rel, album, ext, kind, COALESCE(local_size, bytes, 0), local_size FROM files "
              f"WHERE local IN ({words})")
         with self.lock:
             if album is None:
                 return self.db.execute(q).fetchall()
             return self.db.execute(q + " AND album=?", (album,)).fetchall()
+
+    # ------------------------------------------------------------------ files the app made (extras.py)
+    def extras(self) -> dict:
+        """{rel: (album, kind, sig)} of the playlists and folder images this app wrote."""
+        with self.lock:
+            return {r: (a, k, s) for r, a, k, s in self.db.execute("SELECT rel, album, kind, sig FROM extras")}
+
+    def set_extra(self, rel: str, album: str, kind: str, sig: str) -> None:
+        with self.lock:
+            self.db.execute("INSERT OR REPLACE INTO extras VALUES (?,?,?,?)", (rel, album, kind, sig))
+
+    def drop_extras(self, rels: Iterable[str]) -> None:
+        with self.lock:
+            self.db.executemany("DELETE FROM extras WHERE rel=?", [(r,) for r in rels])
+            self.db.commit()
 
     def vanished_downloaded(self, scan_id: int) -> list:
         """Albums a full scan didn't see although something of them was downloaded."""

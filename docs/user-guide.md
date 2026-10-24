@@ -46,6 +46,8 @@ to see just those.
 - **Track names**: as khinsider names them, or `01 - Title.mp3` / `1-01 - Title.flac` from the
   album's disc and track numbers.
 - **Art folder**: put the images in an `Art` folder inside each album's folder.
+- **Playlist** and **folder.jpg**: a playlist and a copy of the cover in each downloaded album's
+  folder, for Plex, Jellyfin, Kodi and music players.
 - **Folders**: one folder per album, or grouped by platform, type or year.
 - **A ticked platform brings in these album types**: e.g. tick only *Gamerip* so ticking SNES
   doesn't also bring in every arrangement and remix.
@@ -70,18 +72,28 @@ khinsider doesn't change albums once they're up, so once an album is downloaded,
 alone - they don't ask khinsider about it or look through its files again. If you deleted some of
 its files by hand, open the album and click **Check files**: the next sync gets the missing ones.
 To check every album at once, use **Check download folder** in the ☰ menu (it only looks at your
-disk; it doesn't ask khinsider anything).
+disk; it doesn't ask khinsider anything). It also notices files that were cut short.
 
 **Better quality later**: if you downloaded an album as MP3 and khinsider also has it as FLAC, its
 window offers **Upgrade to FLAC**. The next sync downloads the FLAC files and, once they are all
 there, deletes the album's MP3s (the images stay). Until then you keep the MP3s.
 **Cancel upgrade** undoes it.
+
+To move your whole collection to another format, change **Formats** in Settings and tick
+**Replace old formats**: each album's old files go once its new ones have all arrived.
+
+**Sync now** in an album's window syncs just that album.
 To pick up tracks khinsider added to an album later, open it and click **Read album page**.
 
 ## 7. Keep it up to date
 
-In Settings, set **Sync automatically every N hours** (e.g. 24). Every few days it also scans the
-site, so new albums of your ticked platforms arrive by themselves.
+In Settings, set **Sync automatically every N hours** (e.g. 24). Each run first looks at khinsider's
+newest albums (one page), and every few days it reads the whole site, so new albums of your ticked
+platforms arrive by themselves. **Scan for new albums** in the ☰ menu does the quick look by hand.
+
+**Before a scheduled sync, check the download folder** is off by default: checking looks at every
+file you downloaded, which wakes the disks (on Unraid, the array). Pick once a day, week or month if
+you want it.
 
 ## 8. Clean up
 

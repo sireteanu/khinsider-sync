@@ -39,6 +39,10 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h10l4 4v12H5zM14 4v5h5M8 12h8M8 15h8M8 18h5" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
           <span><b>Read ticked album pages</b><small>Track lists and sizes now, without downloading</small></span>
         </button>
+        <button id="btn-quick" role="menuitem">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l2.3 5.2 5.7.5-4.3 3.8 1.3 5.5L12 15.1 7 18l1.3-5.5L4 8.7l5.7-.5z" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+          <span><b>Scan for new albums</b><small>Reads only khinsider's newest additions - usually one page</small></span>
+        </button>
         <button id="btn-check" role="menuitem">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h7l2 2h9v11H3zM9 13.5l2 2 4-4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
           <span><b>Check download folder</b><small>Finds downloaded files you deleted; the next sync gets them again</small></span>
@@ -105,7 +109,7 @@
         <span id="list-title" class="list-title"></span>
         <span id="list-count" class="muted small"></span>
         <label id="plat-tick-wrap" class="check plat-tick" hidden><input type="checkbox" id="plat-tick">
-          <span>Sync every album of <b id="plat-tick-name"></b>, also ones added later</span></label>
+          <span>Sync every album of <b id="plat-tick-name"></b>, also ones added later<small id="plat-tick-types" class="muted"></small></span></label>
         <button id="btn-clear-sel" class="btn small ghost" title="Untick everything">Clear ticks</button>
       </div>
       <div class="acols">
@@ -166,6 +170,7 @@
   <div class="al-bar">
     <label class="check"><input type="checkbox" id="al-tick"><span id="al-tick-text">Sync this album</span></label>
     <span class="grow"></span>
+    <button id="al-sync" class="btn small primary" type="button" title="Download what this album still needs now - only this album (it gets ticked if it isn't)" hidden>Sync now</button>
     <button id="al-check" class="btn small" type="button" title="Look in the download folder for this album's files; missing ones are downloaded again by the next sync" hidden>Check files</button>
     <button id="al-read" class="btn small" type="button" title="Read the album's page on khinsider again">Read album page</button>
     <a id="al-site" class="btn small ghost" target="_blank" rel="noopener">Open on khinsider</a>
@@ -211,7 +216,10 @@
       <ol id="fmt-list" class="fmt-list"></ol>
       <small id="fmt-hint">Tick the formats you want and move them up or down. Files download in this order:
         everything in the top format first (across all albums), then the next. FLAC is often 3 to 5 times
-        the size of MP3. An album with none of the ticked formats isn't downloaded.</small></fieldset>
+        the size of MP3. An album with none of the ticked formats isn't downloaded.</small>
+      <label class="check"><input type="checkbox" name="replace_formats"> <span>Replace old formats: when the formats change,
+        delete an album's music files of formats you no longer sync - only once its new files are all downloaded
+        <small class="muted">(e.g. switch to FLAC and your MP3s go after the FLACs arrive; images are kept)</small></span></label></fieldset>
     <div class="row2">
       <label class="field"><span>Folders</span>
         <select name="folder_layout">
@@ -229,6 +237,8 @@
         <small>Changing this renames the tracks you have at the next sync.</small></label>
     </div>
     <label class="check"><input type="checkbox" name="art_folder"> Put the images in an Art folder inside the album's folder</label>
+    <label class="check"><input type="checkbox" name="playlists"> <span>Write a playlist (<i>Album.m3u8</i>) into each downloaded album's folder</span></label>
+    <label class="check"><input type="checkbox" name="folder_art"> <span>Copy each downloaded album's cover to <i>folder.jpg</i> (Plex, Jellyfin, Kodi and Windows show it)</span></label>
     <fieldset class="field types-box"><legend>A ticked platform brings in these album types</legend>
       <div id="types-list" class="types-list"></div>
       <small>None ticked = every type. Albums you tick one by one are always synced.</small></fieldset>
@@ -252,8 +262,16 @@
     </div>
     <div class="row2">
       <label class="field"><span>Sync automatically every</span><span class="unit"><input name="sync_every_hours" type="number" min="0" step="1"> hours</span><small>0 turns it off.</small></label>
-      <label class="field"><span>Scan the site every</span><span class="unit"><input name="full_scan_every_days" type="number" min="0" step="1"> days</span><small>Finds new albums for ticked platforms.</small></label>
+      <label class="field"><span>Scan the whole site every</span><span class="unit"><input name="full_scan_every_days" type="number" min="0" step="1"> days</span><small>Other scheduled syncs only read khinsider's newest albums (usually one page).</small></label>
     </div>
+    <label class="field"><span>Before a scheduled sync, check the download folder for deleted files</span>
+      <select name="check_folder_days">
+        <option value="0">Never - leave the disks asleep</option>
+        <option value="1">Once a day</option>
+        <option value="7">Once a week</option>
+        <option value="30">Once a month</option>
+      </select>
+      <small>Looks at every downloaded file, which wakes the disks it is on (on Unraid, the array). <b>Check download folder</b> in the menu does it whenever you like.</small></label>
     <label class="check"><input type="checkbox" name="resume_interrupted"> Continue an unfinished sync when the app starts again (after a restart, crash or reboot)</label>
     <label class="check"><input type="checkbox" name="impersonate"> Look like Chrome to khinsider (its Cloudflare protection can turn other programs away)</label>
     <p id="settings-error" class="error" hidden></p>

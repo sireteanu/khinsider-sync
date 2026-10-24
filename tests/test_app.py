@@ -136,6 +136,48 @@ def test_new_albums_of_a_ticked_platform_are_synced_too(site, app_factory):
     assert "Streets of Rage 2/01. Go Straight.mp3" in on_disk(c.data)
 
 
+def test_scan_for_new_albums_reads_only_the_newest(site, app_factory):
+    c = app_factory(site)
+    scan(c)
+    site.add_album("brand-new-ost", "Brand New OST", platforms=["nintendo-snes"])
+    site.reset_log()
+    assert c.post("/api/scan", json={"quick": True}).status_code == 200
+    st = wait(c)
+    pages = [p for p, _ in site.requests if not p.startswith("/robots")]
+    assert pages == ["/"], "one page of the newest albums, no browse pages, no album pages"
+    assert st["job"]["kind"] == "quick" and st["job"]["phase"] == "done"
+    assert "brand-new-ost" in albums(c, platform="nintendo-snes")
+    assert any("Newest albums done: 1 pages" in m for m in log_lines(st))
+
+
+def test_scan_for_new_albums_without_a_scan_does_a_full_one(site, app_factory):
+    c = app_factory(site)
+    assert c.post("/api/scan", json={"quick": True}).status_code == 200
+    st = wait(c)
+    assert any(p.startswith("/game-soundtracks/browse/") for p, _ in site.requests)
+    assert len(albums(c)) == 7
+    assert any("No finished scan yet" in m for m in log_lines(st))
+
+
+def test_scan_for_new_albums_falls_back_to_a_full_scan_when_too_long_ago(site, app_factory):
+    import khinsider_sync.scanner as scanner
+    c = app_factory(site)
+    scan(c)
+    site.remove("sonic-the-hedgehog-genesis")       # only a full scan notices this
+    old = scanner.Scanner.scan_latest
+
+    async def short(self, name_of, since, max_pages=30):
+        return await old(self, name_of, "1900-01-01", max_pages=1)  # not back far enough in one page
+    scanner.Scanner.scan_latest = short
+    try:
+        assert c.post("/api/scan", json={"quick": True}).status_code == 200
+        st = wait(c)
+    finally:
+        scanner.Scanner.scan_latest = old
+    assert any("a full scan is needed" in m for m in log_lines(st))
+    assert "sonic-the-hedgehog-genesis" not in albums(c)
+
+
 def test_albums_gone_from_the_site_leave_the_catalog_but_not_the_disk(site, app_factory):
     c = app_factory(site)
     scan(c)

@@ -25,12 +25,14 @@ src/khinsider_sync/
   __main__.py   options / env vars (KHINSIDER_DATA, _CONFIG, _HOST, _PORT, _PASSWORD, _DATA_LOCKED)
   web.py        FastAPI routes (status, platforms, albums, album, select, scan, read, sync, settings ...);
                 /api/albums slices a cached view (album_view) - the page's list scrolls through all of it
-  engine.py     one job at a time (scan | read | sync | scan+sync | check), Resolver, where albums go
+  engine.py     one job at a time (scan | quick | read | sync | scan+sync | quick+sync | check), Resolver, where albums go
                 (album_dir), moving saved files, progress, LogBuffer, scheduler
   catalog.py    SQLite <config>/catalog.db: albums, platforms, files, selection, settings, scans,
                 history, changes; wanted_exts() decides which formats/images a sync saves
-  scanner.py    scan_site() reads /console-list + every browse page; read_albums() reads album pages
-  parse.py      every page reader (browse list, album page, track page, platform list)
+  scanner.py    scan_site() reads /console-list + every browse page; scan_latest() the home page's newest
+                albums (quick scan, falls back to a full scan); read_albums() reads album pages
+  parse.py      every page reader (browse list, latest list, album page, track page, platform list)
+  extras.py     optional playlists (.m3u8) and folder.jpg per downloaded album, tracked in `extras`
   cleanup.py    Clean up: walk the download folder, judge files (gone / part / unticked), delete
   static/       index.html, app.css, app.js - no build step, no CDN (works offline on a LAN)
   core/         the sync engine from Rom Sync
@@ -45,6 +47,8 @@ tests/  conftest (app_factory + API helpers), mock_site, fixtures/ (real markup 
 ```
 
 ## How khinsider works (verified in a browser, October 2026 - see README "Facts")
+- The home page `/?page=N` lists the newest albums (8 days a page under `h3.latestSoundtrackHeading`,
+  one `table.albumList` each) - the quick scan reads it.
 - ~106,000 albums. `/game-soundtracks/browse/<0-9|A..Z>?page=N` lists 500 albums a page in
   `table.albumList` (cover | name | platforms | type | year) - about 230 pages in all. A full scan
   reads only these plus `/console-list`; it never reads album pages or files.
@@ -63,7 +67,7 @@ tests/  conftest (app_factory + API helpers), mock_site, fixtures/ (real markup 
   No per-file dates: files get the album's Date Added (12:00 local time).
 
 ## Rules (keep these)
-1. **Scans never touch album pages or files**; reading album pages never downloads files. Only a
+1. **Scans never touch album pages or files** (the quick scan reads only the home page); reading album pages never downloads files. Only a
    sync requests track pages and files.
 2. **Selection**: keys `a:<slug>` (one album, include or exclude) and `p:<platform>` (every album
    of a platform, also ones added later; limited by setting `platform_types`). An album's own rule
@@ -82,7 +86,8 @@ tests/  conftest (app_factory + API helpers), mock_site, fixtures/ (real markup 
    `format_rank()` the download order across albums (the sync sorts its queue by it).
    **Upgrades** (`Engine.upgrade_album`, setting `album_upgrades`): an album gets `first:<better>[,art]`
    as its own formats; `_finish_upgrades` (end of a sync, before the leftover check) deletes its old-format
-   files only once every new file is in; cleanup never lists them meanwhile.
+   files only once every new file is in; cleanup never lists them meanwhile. `replace_formats` does the
+   same for every ticked album after a formats change. Renamed albums take their `album_*` settings along.
 4. **Moving, not re-downloading**: when an album's place changes (layout, Saved as, a renamed
    album), the next sync moves files the manifest says it saved (`Engine._relocate`,
    `Manifest.by_url/move`) and removes the folders left empty.
