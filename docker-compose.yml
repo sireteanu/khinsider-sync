@@ -1,0 +1,17 @@
+services:
+  khinsider-sync:
+    build: .
+    image: khinsider-sync:latest
+    container_name: khinsider-sync
+    ports:
+      - "8485:8485"
+    volumes:
+      - ./config:/config          # catalog, settings and selection
+      - /path/to/music:/data      # where synced files go - change to your share
+    environment:
+      - PUID=99                   # Unraid: nobody
+      - PGID=100                  # Unraid: users
+      - UMASK=000
+      - TZ=America/New_York        # used for file dates and the schedule
+      # - KHINSIDER_PASSWORD=change-me   # ask for a password in the browser
+    restart: on-failure            # restarts after a crash; stays off after "Shut down"

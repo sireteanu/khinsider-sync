@@ -1,0 +1,26 @@
+# Khinsider Sync for Unraid's Compose Manager: builds the image on the server straight from GitHub.
+# Docker > Compose > Add New Stack "khinsider-sync" > Edit Stack > Compose File: paste this, then Compose Up.
+# Every "Compose Up" fetches the latest code from GitHub and rebuilds (pull_policy: build).
+services:
+  khinsider-sync:
+    build:
+      context: https://github.com/sireteanu/khinsider-sync.git#main
+      # no git on the server? download the code to this folder instead (see README) and use:
+      # context: /path/to/appdata/khinsider-sync/src
+    pull_policy: build
+    image: khinsider-sync:latest
+    container_name: khinsider-sync
+    ports:
+      - "8485:8485"
+    volumes:
+      - /path/to/appdata/khinsider-sync/config:/config   # catalog, settings, ticks, log
+      - /path/to/music/game-soundtracks:/data            # where the albums go - change to your share
+    environment:
+      - PUID=99            # nobody
+      - PGID=100           # users
+      - UMASK=000
+      - TZ=America/New_York
+      # - KHINSIDER_PASSWORD=change-me
+    labels:
+      net.unraid.docker.webui: "http://[IP]:[PORT:8485]/"
+    restart: on-failure            # restarts after a crash; stays off after "Shut down"

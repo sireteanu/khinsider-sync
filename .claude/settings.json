@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest *)",
+      "Bash(python -m pytest)",
+      "Bash(pytest *)",
+      "Bash(python -m pyflakes *)",
+      "Bash(pip install -e *)",
+      "Bash(git status *)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(python run.py --help)"
+    ],
+    "deny": []
+  }
+}

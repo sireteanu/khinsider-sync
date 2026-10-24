@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Khinsider Sync</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='%235b3f9e'/%3E%3Ccircle cx='16' cy='16' r='4.5' fill='%23e8e5ee'/%3E%3Ccircle cx='16' cy='16' r='1.6' fill='%235b3f9e'/%3E%3C/svg%3E">
+<script>
+  // apply the saved theme before anything is drawn (dark unless you picked light)
+  try { if (localStorage.getItem("theme") === "light") document.documentElement.dataset.theme = "light"; } catch (e) {}
+</script>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <svg class="cart disc" viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="13"/><circle class="lbl" cx="16" cy="16" r="4.5"/><circle cx="16" cy="16" r="1.6"/></svg>
+    <h1>Khinsider Sync</h1>
+    <a id="version" class="version" href="https://github.com/sireteanu/khinsider-sync/releases" target="_blank" rel="noopener"
+       title="What's new in this version"></a>
+    <span id="jobpill" class="pill idle">Idle</span>
+  </div>
+  <div class="actions">
+    <button id="btn-scan" class="btn" title="Read khinsider's album lists to find new albums (no music is downloaded)">Scan site</button>
+    <button id="btn-sync" class="btn primary" title="Download new, incomplete and changed files of the ticked albums">Sync ticked</button>
+    <button id="btn-stop" class="btn danger" disabled>Stop</button>
+    <button id="btn-changes" class="btn" title="Every file added, updated or deleted, by date">Activity log</button>
+    <div class="power">
+      <button id="btn-menu" class="btn icon" title="Settings, theme, restart and shut down" aria-label="Menu"
+              aria-haspopup="menu" aria-expanded="false" aria-controls="app-menu">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16v2H4zM4 11h16v2H4zM4 16h16v2H4z"/></svg>
+      </button>
+      <div id="app-menu" class="menu" role="menu" hidden>
+        <button id="btn-settings" role="menuitem">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Zm8.6 4.9-.1-2.8 2-1.6-2-3.4-2.4.9-2.4-1.4L15.3 2h-3.9l-.4 2.6-2.4 1.4-2.4-.9-2 3.4 2 1.6v2.8l-2 1.6 2 3.4 2.4-.9 2.4 1.4.4 2.6h3.9l.4-2.6 2.4-1.4 2.4.9 2-3.4-2-1.6Z"/></svg>
+          <span><b>Settings</b><small>Download folder, formats, folders, speed, schedule</small></span>
+        </button>
+        <button id="btn-read" role="menuitem">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h10l4 4v12H5zM14 4v5h5M8 12h8M8 15h8M8 18h5" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+          <span><b>Read ticked album pages</b><small>Track lists and sizes now, without downloading</small></span>
+        </button>
+        <button id="btn-theme" role="menuitem" class="theme-toggle">
+          <svg class="sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/></svg>
+          <svg class="moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z"/></svg>
+          <span><b id="theme-label">Light theme</b><small>Switch between dark and light</small></span>
+        </button>
+        <hr>
+        <button id="btn-restart" role="menuitem">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4a8 8 0 1 0 7.75 6h-2.1A6 6 0 1 1 12 6c1.6 0 3.1.6 4.2 1.7L13 11h7V4l-2.4 2.4A7.9 7.9 0 0 0 12 4Z"/></svg>
+          <span><b>Restart</b><small>Back in a few seconds; a running sync carries on</small></span>
+        </button>
+        <button id="btn-shutdown" role="menuitem" class="danger">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 3h2v9h-2zM6.3 6.3l1.4 1.4A6 6 0 1 0 16.3 7.7l1.4-1.4A8 8 0 1 1 6.3 6.3Z"/></svg>
+          <span><b>Shut down</b><small>Stops Khinsider Sync until you start it again</small></span>
+        </button>
+      </div>
+    </div>
+  </div>
+</header>
+
+<section class="storage" aria-label="Selection">
+  <div class="storage-text">
+    <span id="sel-summary">Nothing ticked yet</span>
+    <span id="cat-summary" class="muted"></span>
+  </div>
+  <div class="bar" id="storage-bar" role="img" aria-label="Ticked, synced and remaining size">
+    <div class="seg synced" id="bar-synced"></div><div class="seg todo" id="bar-todo"></div>
+  </div>
+  <div class="legend">
+    <span><i class="sw synced"></i><span id="lg-synced">Synced 0 B</span></span>
+    <span><i class="sw todo"></i><span id="lg-todo">To download 0 B</span></span>
+    <span id="lg-unread" class="muted"></span>
+    <span id="lg-dest" class="muted"></span>
+  </div>
+</section>
+
+<main class="layout" id="layout">
+  <section class="browser library" aria-label="Albums">
+    <nav class="side" aria-label="Platforms">
+      <input id="plat-filter" type="search" placeholder="Platforms" autocomplete="off" aria-label="Find a platform">
+      <div id="plat-list" class="plat-list"></div>
+    </nav>
+    <div class="albums-pane">
+      <div class="toolbar">
+        <input id="search" type="search" placeholder="Find an album, e.g. Chrono Trigger" autocomplete="off" aria-label="Find an album">
+        <select id="f-type" aria-label="Album type"><option value="">Every type</option></select>
+        <select id="f-show" aria-label="Show">
+          <option value="all">All albums</option><option value="ticked">Ticked</option>
+          <option value="synced">With synced files</option><option value="failed">With problems</option>
+        </select>
+      </div>
+      <div class="list-head">
+        <span id="list-title" class="list-title"></span>
+        <span id="list-count" class="muted small"></span>
+        <label id="plat-tick-wrap" class="check plat-tick" hidden><input type="checkbox" id="plat-tick">
+          <span>Sync every album of <b id="plat-tick-name"></b>, also ones added later</span></label>
+        <button id="btn-clear-sel" class="btn small ghost" title="Untick everything">Clear ticks</button>
+      </div>
+      <div class="cols acols">
+        <span></span>
+        <button class="sort" data-sort="name" title="Sort by name">Album</button>
+        <button class="sort c-num" data-sort="year" title="Sort by year">Year</button>
+        <button class="sort c-num c-size" data-sort="size" title="Sort by size (of what a sync saves)">Size</button>
+        <button class="sort c-meter" data-sort="synced" title="Sort by how much is synced">Synced</button>
+        <span></span>
+      </div>
+      <div id="alist" class="alist" role="list"></div>
+      <div class="more"><button id="btn-more" class="btn small" hidden>Show more</button></div>
+      <div id="empty" class="empty" hidden>
+        <h2>Start with a scan</h2>
+        <p>The catalog is empty. A scan reads khinsider's album lists (about 230 pages for 100,000+ albums),
+           without downloading any music, so you can find albums here and tick what you want to keep.</p>
+        <button class="btn primary" id="btn-scan-empty">Scan site</button>
+      </div>
+    </div>
+  </section>
+
+  <aside class="activity" aria-label="Activity">
+    <div class="card" id="job-card">
+      <h2>Activity</h2>
+      <p id="job-line" class="muted">No job running.</p>
+      <div id="outage" class="outage" role="status" hidden>
+        <b>khinsider isn't answering</b>
+        <span id="outage-text"></span>
+      </div>
+      <div id="eta-box" class="eta" hidden>
+        <div class="eta-head"><span class="muted small">This sync</span><span id="eta-total" class="small"></span></div>
+        <div class="eta-main"><span class="muted small">Time remaining</span><b id="eta-time">-</b></div>
+        <div class="bar thin" role="img" aria-label="Progress of this sync"><div class="seg synced" id="eta-bar"></div></div>
+        <div id="eta-sub" class="muted small"></div>
+      </div>
+      <div id="scan-stats" class="stats" hidden></div>
+      <div id="sync-stats" class="stats" hidden></div>
+      <p id="sync-paused" class="error small" hidden></p>
+      <div id="leftover-box" class="leftover">
+        <span id="leftover-text" class="small"></span>
+        <button id="btn-cleanup" class="btn small" title="Find files in the download folder that aren't part of the sync any more">Clean up…</button>
+      </div>
+      <p id="next-run" class="muted small"></p>
+    </div>
+    <div class="card log-card">
+      <h2>Log</h2>
+      <ol id="log" class="log" aria-live="polite"></ol>
+    </div>
+    <div class="card dl-card" id="dl-card" hidden>
+      <h2>Downloading <span id="dl-count" class="muted small"></span></h2>
+      <div id="downloads" class="downloads"></div>
+    </div>
+  </aside>
+</main>
+
+<dialog id="album-dlg" class="dlg wide">
+  <div class="dlg-head"><h2 id="al-title">Album</h2><button class="btn icon" id="al-close" aria-label="Close">✕</button></div>
+  <p id="al-meta" class="muted small"></p>
+  <div class="al-bar">
+    <label class="check"><input type="checkbox" id="al-tick"><span id="al-tick-text">Sync this album</span></label>
+    <span class="grow"></span>
+    <button id="al-read" class="btn small" type="button" title="Read the album's page on khinsider again">Read album page</button>
+    <a id="al-site" class="btn small ghost" target="_blank" rel="noopener">Open on khinsider</a>
+  </div>
+  <label class="field al-place"><span>Saved as</span>
+    <span class="unit"><input id="al-place" spellcheck="false" autocomplete="off"><button id="al-place-save" class="btn small" type="button">Save</button></span>
+    <small id="al-place-hint">The album's folder in the download folder. Type another (e.g. Soundtracks/Persona 5) and Save; clear it to go back.</small></label>
+  <p id="al-sub" class="muted small"></p>
+  <div class="files-wrap"><table class="files"><thead><tr><th>#</th><th>Track</th><th>Format</th><th>Size</th><th>Status</th></tr></thead><tbody id="al-body"></tbody></table></div>
+</dialog>
+
+<dialog id="settings-dlg" class="dlg">
+  <form id="settings-form" method="dialog">
+    <div class="dlg-head"><h2>Settings</h2><button class="btn icon" value="cancel" aria-label="Close">✕</button></div>
+    <label class="field"><span>Download folder</span>
+      <input name="data_dir" required>
+      <small id="data-hint">Each album gets a folder of its own in here.</small></label>
+    <div class="row2">
+      <label class="field"><span>Formats</span>
+        <select name="formats_mode">
+          <option value="mp3">MP3</option>
+          <option value="flac">FLAC where offered, else MP3</option>
+          <option value="best">Best quality (lossless where offered)</option>
+          <option value="all">Every format the album offers</option>
+          <option value="custom">Only these formats</option>
+        </select>
+        <input name="formats_custom" placeholder=".mp3, .ogg" hidden>
+        <small>FLAC albums are often 3 to 5 times the size of MP3.</small></label>
+      <label class="field"><span>Folders</span>
+        <select name="folder_layout">
+          <option value="album">One folder per album</option>
+          <option value="platform">Platform / album</option>
+          <option value="type">Type (Gamerip, Soundtrack…) / album</option>
+          <option value="year">Year / album</option>
+        </select>
+        <small>Changing this moves albums you have at the next sync.</small></label>
+    </div>
+    <label class="check"><input type="checkbox" name="album_art"> Also save each album's images (covers, scans)</label>
+    <fieldset class="field types-box"><legend>A ticked platform brings in these album types</legend>
+      <div id="types-list" class="types-list"></div>
+      <small>None ticked = every type. Albums you tick one by one are always synced.</small></fieldset>
+    <div class="row2">
+      <label class="field"><span>Re-read ticked album pages after</span><span class="unit"><input name="album_refresh_days" type="number" min="0" step="1"> days</span>
+        <small>Before a sync. Picks up tracks added to an album. 0 = before every sync.</small></label>
+      <label class="field"><span>When the site is down, wait up to</span><span class="unit"><input name="outage_wait_hours" type="number" min="0" step="0.5"> hours</span>
+        <small>Downloads hold and continue when it's back. 0 = don't wait.</small></label>
+    </div>
+    <div class="row2">
+      <label class="field"><span>Parallel downloads</span>
+        <select name="parallel_mode"><option value="auto">As many as the server allows</option><option value="fixed">Fixed number</option></select></label>
+      <label class="field"><span id="par-label">Upper limit</span><input name="parallel_n" type="number" min="1" max="64"></label>
+    </div>
+    <div class="row2">
+      <label class="field"><span>Speed limit</span><input name="max_rate" placeholder="Unlimited, or e.g. 10M"></label>
+      <label class="field"><span>Keep free on disk</span><input name="min_free" placeholder="2G"></label>
+    </div>
+    <div class="row2">
+      <label class="field"><span>File permissions</span><input name="file_mode" placeholder="Leave empty for the system default" inputmode="numeric">
+        <small>For downloaded files and new folders. 777 = everyone can read and write them.</small></label>
+      <span></span>
+    </div>
+    <div class="row2">
+      <label class="field"><span>Sync automatically every</span><span class="unit"><input name="sync_every_hours" type="number" min="0" step="1"> hours</span><small>0 turns it off.</small></label>
+      <label class="field"><span>Scan the site every</span><span class="unit"><input name="full_scan_every_days" type="number" min="0" step="1"> days</span><small>Finds new albums for ticked platforms.</small></label>
+    </div>
+    <label class="check"><input type="checkbox" name="resume_interrupted"> Continue an unfinished sync when the app starts again (after a restart, crash or reboot)</label>
+    <label class="check"><input type="checkbox" name="check_remote"> Ask the server about every file I already have (exact, but one request per file)</label>
+    <p id="settings-error" class="error" hidden></p>
+    <div class="dlg-foot"><button class="btn ghost" value="cancel">Cancel</button><button class="btn primary" id="settings-save" value="save">Save settings</button></div>
+  </form>
+</dialog>
+
+<dialog id="list-dlg" class="dlg wide">
+  <form method="dialog" class="dlg-head"><h2 id="list-title-dlg">Files</h2><button class="btn icon" aria-label="Close">✕</button></form>
+  <p id="list-sub" class="muted small"></p>
+  <div class="files-wrap"><table class="files"><thead><tr><th>File</th><th>Size</th><th id="list-col3">Time</th></tr></thead><tbody id="list-body"></tbody></table></div>
+</dialog>
+
+<dialog id="changes-dlg" class="dlg wide">
+  <form method="dialog" class="dlg-head"><h2>Activity log</h2><button class="btn icon" aria-label="Close">✕</button></form>
+  <p class="muted small">Every file added, updated or deleted in the download folder, by date (kept for a year).
+    Open a day to see its files.</p>
+  <div id="changes-days" class="changes-days"></div>
+</dialog>
+
+<dialog id="cleanup-dlg" class="dlg wide">
+  <form method="dialog" class="dlg-head"><h2>Clean up the download folder</h2><button class="btn icon" aria-label="Close">✕</button></form>
+  <p class="muted small">Files in the download folder that aren't part of the sync any more. Tick what should go;
+    nothing is deleted until you confirm. Only files Khinsider Sync downloaded or knows are listed - other music in the
+    folder is never touched.</p>
+  <p id="clean-loading" class="muted">Checking the download folder…</p>
+  <p id="clean-empty" class="muted" hidden>Nothing to clean up: everything in the download folder is part of the sync.</p>
+  <div id="clean-body" class="clean-body"></div>
+  <p id="clean-result" class="small" hidden></p>
+  <div id="clean-foot" class="dlg-foot" hidden>
+    <span id="clean-sel" class="muted small grow"></span>
+    <button id="clean-delete" class="btn danger" type="button">Delete selected…</button>
+  </div>
+  <div id="clean-confirm" class="confirm-bar" hidden>
+    <span id="clean-confirm-text"></span>
+    <button id="clean-confirm-no" class="btn" type="button">Cancel</button>
+    <button id="clean-confirm-yes" class="btn danger-fill" type="button">Delete</button>
+  </div>
+</dialog>
+
+<div id="restarting" class="restarting" hidden><div><b>Restarting Khinsider Sync…</b><p class="muted">This page reloads when it's back.</p></div></div>
+<div id="shutdown" class="restarting" hidden><div><b>Khinsider Sync is shut down</b><p id="shutdown-how" class="muted"></p></div></div>
+
+<template id="album-tpl">
+  <div class="arow" role="listitem">
+    <input type="checkbox" class="tick">
+    <span class="aname"><b class="n"></b><span class="sub"></span></span>
+    <span class="c-num year"></span>
+    <span class="c-num size"></span>
+    <span class="c-meter"><span class="meter"><span class="fill"></span></span><span class="pct"></span></span>
+    <button class="info" title="Tracks, folder and status" aria-label="Show tracks">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+    </button>
+  </div>
+</template>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

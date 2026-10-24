@@ -1,0 +1,251 @@
+"""Syncing: what is downloaded where, resuming, updates, formats, folders, speed."""
+import os
+import time
+
+from conftest import BIRD, SMW, album, file_status, log_lines, on_disk, scan, select, sync, wait
+
+SMW_MP3 = {"Super Mario World/01. Nintendo Logo.mp3", "Super Mario World/02. Title Screen.mp3",
+           "Super Mario World/03. Overworld.mp3"}
+
+
+def first_sync(c, key="a:" + SMW, settings=None):
+    if settings:
+        assert c.post("/api/settings", json=settings).status_code == 200
+    scan(c)
+    select(c, key)
+    return sync(c)
+
+
+def test_downloads_mp3_and_images_into_the_album_folder(site, app_factory):
+    c = app_factory(site)
+    st = first_sync(c)
+    assert on_disk(c.data) == SMW_MP3 | {"Super Mario World/Cover.jpg"}
+    assert st["sync"]["new"] == 4 and st["sync"]["failed"] == 0
+    with open(c.data / "Super Mario World" / "01. Nintendo Logo.mp3", "rb") as f:
+        assert f.read() == site.content(SMW, "01. Nintendo Logo.mp3")
+    # one track page per track (for its download link), never for the image
+    assert len(site.track_pages()) == 3
+    assert all(f["local"] == "new" for f in album(c, SMW)["files"] if f["wanted"])
+
+
+def test_a_second_sync_downloads_nothing_and_asks_for_nothing(site, app_factory):
+    c = app_factory(site)
+    first_sync(c)
+    site.reset_log()
+    st = sync(c)
+    assert st["sync"]["up to date"] == 4 and st["sync"]["new"] == 0
+    assert not site.file_requests() and not site.track_pages()
+    assert not site.album_pages(), "album pages read within the last 7 days aren't read again"
+
+
+def test_album_pages_are_read_again_after_the_set_days(site, app_factory):
+    c = app_factory(site, settings={"album_refresh_days": 0})
+    first_sync(c)
+    site.albums[SMW]["tracks"].append(("", "4", "04. Castle", "Castle", "2:00"))
+    site.reset_log()
+    st = sync(c)
+    assert len(site.album_pages()) == 1 and st["sync"]["new"] == 1
+    assert "Super Mario World/04. Castle.mp3" in on_disk(c.data)
+
+
+def test_flac_best_and_every_format(site, app_factory):
+    c = app_factory(site, settings={"formats": "flac", "album_art": False})
+    scan(c)
+    select(c, "a:" + SMW)
+    select(c, "a:" + BIRD)
+    sync(c)
+    files = on_disk(c.data)
+    assert {f for f in files if f.startswith("Super Mario World/")} == {p.replace(".mp3", ".flac") for p in SMW_MP3}
+    assert {f for f in files if f.startswith("A Bird Story/")} == {
+        "A Bird Story/A Bird Story (Piano).mp3", "A Bird Story/Yesterday - Kan (Reives) Gao.mp3"}, \
+        "no FLAC offered: MP3 instead"
+    with open(c.data / "Super Mario World" / "01. Nintendo Logo.flac", "rb") as f:
+        assert f.read(4) == b"fLaC"
+    c.post("/api/settings", json={"formats": "all"})
+    sync(c)
+    files = on_disk(c.data)
+    assert SMW_MP3 <= files and "A Bird Story/Yesterday - Kan (Reives) Gao.ogg" in files
+
+
+def test_names_windows_cant_take_are_made_safe(site, app_factory):
+    c = app_factory(site)
+    first_sync(c, "a:activity-case-01")
+    assert on_disk(c.data) == {"_Activity_ Case_01 -Graveyard Memory-/01. Graveyard.mp3"}
+
+
+def test_resumes_a_dropped_transfer_with_range(site_factory, app_factory):
+    site = site_factory("drop")
+    c = app_factory(site)
+    st = first_sync(c, "a:big-album")
+    assert st["sync"]["failed"] == 0
+    ranges = [r for p, r in site.file_requests() if "Big%20Track" in p]
+    assert ranges[0] is None and any(r and r.startswith("bytes=") for r in ranges[1:])
+    with open(c.data / "Big Album" / "01. Big Track.mp3", "rb") as f:
+        assert f.read() == site.content("big-album", "01. Big Track.mp3")
+
+
+def test_stop_keeps_the_part_file_and_the_next_sync_finishes_it(site_factory, app_factory):
+    site = site_factory("slowfile")
+    c = app_factory(site)
+    scan(c)
+    select(c, "a:big-album")
+    c.post("/api/sync")
+    part = c.data / "Big Album" / "01. Big Track.mp3.part"
+    t0 = time.time()
+    while time.time() - t0 < 20 and not (part.exists() and part.stat().st_size > 100_000):
+        time.sleep(0.05)
+    c.post("/api/stop")
+    st = wait(c)
+    assert st["job"]["phase"] == "stopped" and part.exists()
+    site.reset_log()
+    st = sync(c)
+    assert st["sync"]["resumed"] == 1
+    assert any(r for p, r in site.file_requests())
+    assert on_disk(c.data) == {"Big Album/01. Big Track.mp3"}
+
+
+def test_a_changed_file_on_the_site_is_downloaded_again(site, app_factory):
+    c = app_factory(site, settings={"album_refresh_days": 0})
+    first_sync(c)
+    site.modify(SMW, "02. Title Screen.mp3", grow=50_000)        # its listed size changes
+    st = sync(c)
+    assert st["sync"]["updated"] == 1 and st["sync"]["new"] == 0
+    with open(c.data / "Super Mario World" / "02. Title Screen.mp3", "rb") as f:
+        assert f.read() == site.content(SMW, "02. Title Screen.mp3")
+
+
+def test_a_deleted_file_is_downloaded_again(site, app_factory):
+    c = app_factory(site)
+    first_sync(c)
+    os.remove(c.data / "Super Mario World" / "03. Overworld.mp3")
+    st = sync(c)
+    assert st["sync"]["new"] == 1 and "Super Mario World/03. Overworld.mp3" in on_disk(c.data)
+
+
+def test_files_already_in_the_folder_are_adopted(site, app_factory):
+    a = app_factory(site, name="one")
+    first_sync(a)
+    os.remove(a.data / ".khinsider-sync.db")                  # as if copied in by hand
+    b = app_factory(site, name="two")
+    site.reset_log()
+    st = first_sync(b)
+    assert st["sync"]["already in folder"] == 4, "the tracks match their listed sizes; the cover is kept too"
+    assert not [p for p, _ in site.file_requests() if p.endswith(".mp3")]
+
+
+def test_files_get_the_albums_date_added(site, app_factory):
+    c = app_factory(site)
+    first_sync(c)
+    t = time.localtime(os.stat(c.data / "Super Mario World" / "01. Nintendo Logo.mp3").st_mtime)
+    assert time.strftime("%Y-%m-%d %H:%M", t) == "2025-04-24 12:00"
+
+
+def test_downloaded_files_and_folders_get_the_permissions_setting(site, app_factory):
+    c = app_factory(site, settings={"file_mode": "750"})
+    first_sync(c)
+    if os.name != "nt":
+        assert os.stat(c.data / "Super Mario World" / "01. Nintendo Logo.mp3").st_mode & 0o777 == 0o750
+        assert os.stat(c.data / "Super Mario World").st_mode & 0o777 == 0o750
+
+
+def test_a_web_page_instead_of_a_file_is_not_saved(site_factory, app_factory):
+    site = site_factory("limitfile")
+    c = app_factory(site)
+    st = first_sync(c, "a:big-album")
+    assert "Big Album/02. Limited.mp3" not in on_disk(c.data)
+    assert st["sync"]["failed"] == 1
+    assert file_status(c, "big-album")["02. Limited.mp3"] is None
+
+
+def test_a_broken_file_fails_after_its_retries(site_factory, app_factory):
+    site = site_factory("brokenfile")
+    c = app_factory(site)
+    st = first_sync(c, "a:big-album")
+    assert st["sync"]["failed"] == 1 and st["sync"]["new"] == 1
+    assert not any("isn't answering" in m for m in log_lines(st))
+
+
+def test_daily_limit_pauses_and_the_next_sync_finishes(site, app_factory):
+    c = app_factory(site, settings={"parallel": "1", "album_art": False})
+    scan(c)
+    select(c, "p:windows")
+    site.daily_limit = 2
+    st = sync(c)
+    assert st["sync"]["paused"] and "download limit" in st["sync"]["paused"]
+    assert st["sync"]["failed"] == 0
+    site.daily_limit = None
+    st = sync(c)
+    assert not st["sync"]["paused"] and st["sync"]["failed"] == 0
+    assert len(on_disk(c.data)) == 6
+
+
+def test_a_new_folder_layout_moves_what_you_have(site, app_factory):
+    c = app_factory(site)
+    first_sync(c)
+    c.post("/api/settings", json={"folder_layout": "platform"})
+    site.reset_log()
+    st = sync(c)
+    assert on_disk(c.data) == {"SNES/" + p for p in SMW_MP3 | {"Super Mario World/Cover.jpg"}}
+    assert not site.file_requests(), "moved, not downloaded again"
+    assert any("Moved 4 files" in m for m in log_lines(st))
+    assert not (c.data / "Super Mario World").exists(), "the empty old folder is gone"
+
+
+def test_saved_as_puts_an_album_elsewhere(site, app_factory):
+    c = app_factory(site)
+    first_sync(c)
+    r = c.post("/api/album-place", json={"slug": SMW, "place": "Nintendo/SMW (SNES)"})
+    assert r.status_code == 200 and r.json()["dir"] == "Nintendo/SMW (SNES)"
+    sync(c)
+    assert on_disk(c.data) == {p.replace("Super Mario World/", "Nintendo/SMW (SNES)/")
+                               for p in SMW_MP3 | {"Super Mario World/Cover.jpg"}}
+    assert c.post("/api/album-place", json={"slug": SMW, "place": "../x"}).status_code == 400
+    r = c.post("/api/album-place", json={"slug": SMW, "place": ""})
+    assert r.json()["dir"] == "Super Mario World" and r.json()["place"] == ""
+
+
+def test_an_album_moved_to_a_new_address_keeps_its_tick_and_folder(site, app_factory):
+    c = app_factory(site, settings={"album_refresh_days": 0})
+    first_sync(c)
+    site.rename(SMW, "super-mario-world-snes")
+    site.reset_log()
+    st = sync(c)
+    assert st["sync"]["up to date"] == 4 and st["sync"]["new"] == 0
+    assert any("moved album" in m for m in log_lines(st))
+    assert c.get("/api/albums", params={"show": "ticked"}).json()["albums"][0]["slug"] == "super-mario-world-snes"
+    assert on_disk(c.data) == SMW_MP3 | {"Super Mario World/Cover.jpg"}
+
+
+def test_finds_and_remembers_the_servers_limit(site_factory, app_factory):
+    site = site_factory("bulk")
+    site.max_conc = 3
+    c = app_factory(site, settings={"album_art": False})
+    st = first_sync(c, "a:bulk-album")
+    assert st["sync"]["failed"] == 0 and st["sync"]["new"] == 40
+    assert site.peak_active <= 3
+    assert st["sync"]["limit"] <= 3
+
+
+def test_fixed_number_of_parallel_downloads(site_factory, app_factory):
+    site = site_factory("bulk")
+    c = app_factory(site, settings={"parallel": "2", "album_art": False})
+    first_sync(c, "a:bulk-album")
+    assert site.peak_active <= 2
+
+
+def test_scan_survives_rate_limiting(site_factory, app_factory):
+    site = site_factory("throttle")
+    c = app_factory(site)
+    st = scan(c)
+    assert st["catalog"]["albums"] == 7
+    assert c.get("/api/status").json()["catalog"]["last_full_scan"]["status"] == "done"
+
+
+def test_sync_reports_its_size_and_what_is_left(site, app_factory):
+    c = app_factory(site)
+    st = first_sync(c, "p:windows")
+    s = st["sync"]
+    assert s["to_fetch"] > 0 and s["bytes_planned"] > 0 and s["files_left"] == 0 and s["bytes_left"] == 0
+    sel = st["selection"]
+    assert sel["albums"] == 3 and sel["synced"] == sel["files"] and sel["unread"] == 0
+    assert sel["synced_bytes"] == sel["bytes"], "nothing is left to download"

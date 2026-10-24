@@ -1,0 +1,76 @@
+# Khinsider Sync - user guide
+
+Khinsider Sync keeps a folder of game soundtracks from [khinsider](https://downloads.khinsider.com/)
+on your server or PC, and keeps it up to date. You tick what you want; it downloads it, and later
+syncs only fetch what is new.
+
+## 1. Start it
+
+- **Unraid**: add the stack from the README (Docker → Compose), click **Compose Up**, then open
+  `http://YOUR-SERVER:8485/`.
+- **Windows**: double-click `start.bat`. Your browser opens `http://localhost:8485/`.
+
+## 2. Scan the site
+
+Click **Scan site**. It reads khinsider's album lists - about 230 pages - in a few minutes. No music
+is downloaded. Afterwards you see every album, with the platforms on the left.
+
+## 3. Find and tick albums
+
+- Type in **Find an album** to search everything (name or address).
+- Click a platform on the left to see its albums. Use **Every type** to show only gamerips,
+  soundtracks, arrangements …
+- Tick the box in front of an album to sync it.
+- Tick the box in front of a **platform** (or "Sync every album of …" above its list) to sync every
+  album of that platform - also the ones khinsider adds later. Untick single albums to leave them
+  out. A `-` box means some albums differ from the platform's tick.
+- Click an album's name to see its tracks, formats and sizes. The first time you open it, its page
+  is read from khinsider (a second or two).
+
+The big line at the top shows how much you ticked and how much of it is already synced. Albums whose
+page hasn't been read yet don't have a size; the next sync reads them.
+
+## 4. Choose formats and folders (Settings, in the ☰ menu)
+
+- **Formats**: MP3 (default), FLAC where offered, best quality, every format, or your own list.
+  FLAC is often 3 to 5 times bigger.
+- **Also save each album's images**: covers and scans next to the music.
+- **Folders**: one folder per album, or grouped by platform, type or year.
+- **A ticked platform brings in these album types**: e.g. tick only *Gamerip* so ticking SNES
+  doesn't also bring in every arrangement and remix.
+- To put one album somewhere else, open it and change **Saved as** (e.g. `Soundtracks/Persona 5`).
+
+Changing folders later is safe: the next sync moves what you have; nothing is downloaded twice.
+
+## 5. Sync
+
+Click **Sync ticked**. The Activity panel shows how much is left and how long it will take; the
+Downloading box shows each file. You can **Stop** at any time - the next sync continues where it
+stopped, also after a restart or a power cut.
+
+If khinsider goes down, downloads wait for it and carry on by themselves. If it starts sending web
+pages instead of files (too many downloads), the sync pauses; the next one finishes the job.
+
+## 6. Keep it up to date
+
+In Settings, set **Sync automatically every N hours** (e.g. 24). Every few days it also scans the
+site, so new albums of your ticked platforms arrive by themselves. Album pages of ticked albums are
+read again after a week (setting), which picks up tracks added to an album.
+
+## 7. Clean up
+
+After a sync, the Activity panel says if files in your folder aren't part of the sync any more -
+removed from khinsider, in albums you unticked, or formats you no longer sync. Click **Review**, tick
+what should go, and confirm. Only files Khinsider Sync downloaded are ever listed; other music in the
+same folder is left alone.
+
+## 8. Activity log
+
+**Activity log** (top) lists every file added, updated or deleted, by day, for a year.
+
+## Tips
+
+- Be gentle with khinsider: keep parallel downloads at the default, and don't tick everything.
+- A password for the page: set `KHINSIDER_PASSWORD` in Docker, or `start.bat --password …`.
+- The ☰ menu also has **Read ticked album pages** (sizes without downloading), **Restart** and
+  **Shut down**.

@@ -1,0 +1,23 @@
+# Runs the tests and the linter on every push and pull request (all traffic goes to the in-process
+# mock site - nothing touches khinsider.com).
+name: Tests
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.9", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: pip install -e ".[dev]"
+      - run: python -m pyflakes src tests
+      - run: python -m pytest

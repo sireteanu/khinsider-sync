@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<!--
+  Unraid template for Khinsider Sync.
+  Install: copy this file to /boot/config/plugins/dockerMan/templates-user/my-khinsider-sync.xml,
+  then Docker > Add Container > Template: khinsider-sync.
+  Change <Repository> to where your image lives (see README: "Docker image for Unraid"):
+  Docker Hub: YOUR-DOCKERHUB-NAME/khinsider-sync:latest   GitHub: ghcr.io/YOUR-GITHUB-NAME/khinsider-sync:latest
+-->
+<Container version="2">
+  <Name>khinsider-sync</Name>
+  <Repository>ghcr.io/YOUR-GITHUB-NAME/khinsider-sync:latest</Repository>
+  <Registry>https://github.com/YOUR-GITHUB-NAME/khinsider-sync/pkgs/container/khinsider-sync</Registry>
+  <Network>bridge</Network>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support/>
+  <Project/>
+  <Overview>Browse every soundtrack on downloads.khinsider.com in a web page, tick the albums or whole platforms you want, and keep them in sync. Pick MP3, FLAC or the best quality offered, album art included. Only new, incomplete or changed files are downloaded, parallel downloads tune themselves to what the server allows, and it can re-sync on a schedule.</Overview>
+  <Category>Downloaders:</Category>
+  <WebUI>http://[IP]:[PORT:8485]/</WebUI>
+  <TemplateURL/>
+  <Icon/>
+  <ExtraParams>--restart unless-stopped</ExtraParams>
+  <Config Name="Web interface port" Target="8485" Default="8485" Mode="tcp" Description="Open http://YOUR-SERVER:8485/ in a browser." Type="Port" Display="always" Required="true" Mask="false">8485</Config>
+  <Config Name="Downloads" Target="/data" Default="" Mode="rw" Description="Where the albums go (pick a share). Each album gets a folder of its own below this folder." Type="Path" Display="always" Required="true" Mask="false"></Config>
+  <Config Name="App data" Target="/config" Default="/mnt/user/appdata/khinsider-sync" Mode="rw" Description="Catalog, settings and your ticks." Type="Path" Display="advanced" Required="true" Mask="false">/mnt/user/appdata/khinsider-sync</Config>
+  <Config Name="Password" Target="KHINSIDER_PASSWORD" Default="" Mode="" Description="Optional. When set, the browser asks for it (any user name)." Type="Variable" Display="always" Required="false" Mask="true"></Config>
+  <Config Name="Time zone" Target="TZ" Default="America/New_York" Mode="" Description="Used for file dates and the sync schedule." Type="Variable" Display="advanced" Required="false" Mask="false">America/New_York</Config>
+  <Config Name="PUID" Target="PUID" Default="99" Mode="" Description="User that owns downloaded files (99 = nobody)." Type="Variable" Display="advanced" Required="true" Mask="false">99</Config>
+  <Config Name="PGID" Target="PGID" Default="100" Mode="" Description="Group that owns downloaded files (100 = users)." Type="Variable" Display="advanced" Required="true" Mask="false">100</Config>
+  <Config Name="UMASK" Target="UMASK" Default="000" Mode="" Description="000 = files readable and writable by everyone on the share." Type="Variable" Display="advanced" Required="false" Mask="false">000</Config>
+</Container>

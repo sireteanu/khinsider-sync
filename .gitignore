@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+
+# Tool output and progress
+*.state.db
+*.state.db-*
+directories*.csv
+directories*.txt
+*.part
+*.tmp
+*.log
+
+crawl-results/
+
+# Downloaded archives (keep them out of git)
+downloads/
+roms/
+
+# Personal Claude Code settings
+CLAUDE.local.md
+.claude/settings.local.json
+
+# Web app (start.bat / run.py defaults)
+config/
+downloads/

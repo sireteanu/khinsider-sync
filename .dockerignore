@@ -1,0 +1,9 @@
+.git
+.venv
+**/__pycache__
+config
+downloads
+tests
+*.state.db*
+directories*
+crawl-results
