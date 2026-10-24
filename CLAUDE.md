@@ -25,7 +25,7 @@ src/khinsider_sync/
   __main__.py   options / env vars (KHINSIDER_DATA, _CONFIG, _HOST, _PORT, _PASSWORD, _DATA_LOCKED)
   web.py        FastAPI routes (status, platforms, albums, album, select, scan, read, sync, settings ...);
                 /api/albums slices a cached view (album_view) - the page's list scrolls through all of it
-  engine.py     one job at a time (scan | read | sync | scan+sync), Resolver, where albums go
+  engine.py     one job at a time (scan | read | sync | scan+sync | check), Resolver, where albums go
                 (album_dir), moving saved files, progress, LogBuffer, scheduler
   catalog.py    SQLite <config>/catalog.db: albums, platforms, files, selection, settings, scans,
                 history, changes; wanted_exts() decides which formats/images a sync saves
@@ -80,6 +80,9 @@ tests/  conftest (app_factory + API helpers), mock_site, fixtures/ (real markup 
    (`catalog.parse_format_setting`): presets `mp3|flac|best|all` (images per `album_art`), or ordered
    lists `first:`/`all:` with `art` for images; `format_plan()` gives an album's files in order,
    `format_rank()` the download order across albums (the sync sorts its queue by it).
+   **Upgrades** (`Engine.upgrade_album`, setting `album_upgrades`): an album gets `first:<better>[,art]`
+   as its own formats; `_finish_upgrades` (end of a sync, before the leftover check) deletes its old-format
+   files only once every new file is in; cleanup never lists them meanwhile.
 4. **Moving, not re-downloading**: when an album's place changes (layout, Saved as, a renamed
    album), the next sync moves files the manifest says it saved (`Engine._relocate`,
    `Manifest.by_url/move`) and removes the folders left empty.
@@ -97,7 +100,8 @@ tests/  conftest (app_factory + API helpers), mock_site, fixtures/ (real markup 
 9. **Downloaded albums are final**: khinsider doesn't change albums. A sync reads an album page
    only if it was never read, and skips albums whose wanted files are all downloaded
    (`album_totals()["downloaded"]`) - no request, no disk access. "Read album page" (by hand) and
-   "Check files" (`Engine.check_album`, `Catalog.forget_missing`) are the only ways back in. Before a
+   "Check files" (`Engine.check_album`, `Catalog.forget_missing`) and the "check" job (Check download
+   folder: `Engine._check_folder`, disk only) are the only ways back in. Before a
    full scan prunes, downloaded albums the lists no longer show are looked up once
    (`Scanner._follow_moved`) so a moved album keeps its tick and folder.
 10. Politeness: page reads 4 at a time with pacing (`Limiter`), downloads start at 2 parallel and

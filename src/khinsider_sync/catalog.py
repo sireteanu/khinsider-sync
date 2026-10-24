@@ -28,6 +28,7 @@ DEFAULT_SETTINGS = {
     "folder_layout": "album",       # album | platform | type | year  (folder above each album)
     "album_places": {},             # {album slug: folder in the download folder} - "Saved as"
     "album_formats": {},            # {album slug: formats} - this album's own formats setting
+    "album_upgrades": {},           # {album slug: {to, from, formats, since}} - waiting upgrades (Engine.upgrade_album)
     "track_names": "site",          # site ("1-01. Title.mp3" as khinsider names it) | numbered ("1-01 - Title.mp3")
     "art_folder": False,            # images in an "Art" folder inside the album's folder
     "impersonate": True,            # requests look like Chrome (needs curl_cffi)
@@ -503,6 +504,16 @@ class Catalog:
                 self.db.commit()
             self.changed()
         return [r for _, r in gone]
+
+    def saved_files(self, album: Optional[str] = None) -> list:
+        """[(url, rel, album, ext, kind, size)] of the downloaded files (of one album, or all)."""
+        words = ",".join("'%s'" % w for w in SYNCED_WORDS)
+        q = (f"SELECT url, rel, album, ext, kind, COALESCE(local_size, bytes, 0) FROM files "
+             f"WHERE local IN ({words})")
+        with self.lock:
+            if album is None:
+                return self.db.execute(q).fetchall()
+            return self.db.execute(q + " AND album=?", (album,)).fetchall()
 
     def vanished_downloaded(self, scan_id: int) -> list:
         """Albums a full scan didn't see although something of them was downloaded."""

@@ -44,6 +44,18 @@ def test_platform_counts_follow_the_type_filter(site, app_factory):
     assert c.get("/api/platforms").json()["total"] == 7
 
 
+def test_several_album_types_at_once(site, app_factory):
+    c = app_factory(site)
+    scan(c)
+    both = "Soundtrack,Arrangement"
+    assert set(albums(c, type=both)) == {"persona-5", "activity-case-01", "super-mario-world-the-jazz-arrangements"}
+    d = c.get("/api/platforms", params={"type": both}).json()
+    by = {p["slug"]: p["albums"] for p in d["platforms"]}
+    assert d["total"] == 3 and d["no_platform"] == 1 and by["nintendo-snes"] == 1 and by["windows"] == 1
+    assert c.get("/api/albums", params={"type": "Gamerip, Soundtrack"}).json()["total"] == 6
+    assert c.get("/api/albums", params={"type": "Other"}).json()["total"] == 0
+
+
 def test_album_list_slices_cover_every_album_and_follow_changes(site, app_factory):
     c = app_factory(site)
     scan(c)

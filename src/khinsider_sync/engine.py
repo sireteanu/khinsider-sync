@@ -24,7 +24,9 @@ from .core.sync import MANIFEST_NAME, FileInfo, Manifest, size_range, stamp_fold
 from .core.util import fmt_bytes, parse_size, safe_segment
 
 from . import __version__, parse
-from .catalog import ALBUM, PLATFORM, Catalog, album_plan, album_rank, parse_format_setting, parse_formats
+from .catalog import (ALBUM, PLATFORM, Catalog, album_plan, album_rank, album_wants, parse_format_setting,
+                      parse_formats)
+from .core.constants import AUDIO_EXTENSIONS, BEST_ORDER
 from .scanner import Scanner
 
 log = logging.getLogger("khinsider_sync")
@@ -274,7 +276,10 @@ class Engine:
         own.pop(slug, None)
         if value:
             own[slug] = value
-        self.catalog.save_settings({"album_formats": own})
+        ups = dict(self.catalog.settings().get("album_upgrades") or {})
+        if ups.pop(slug, None):                 # picked by hand: no files are deleted for it any more
+            log.info("Upgrade of %s cancelled (its formats were changed)", a["name"])
+        self.catalog.save_settings({"album_formats": own, "album_upgrades": ups})
         self._sel_cache = None
         log.info("Formats: %s %s", a["name"], f"uses {value}" if value else "back to the general setting")
         return {"slug": slug, "formats": value}
@@ -331,7 +336,7 @@ class Engine:
                 continue
             if k == "data_dir" and self.data_locked:
                 continue
-            if k in ("interrupted_job", "album_places", "album_formats"):
+            if k in ("interrupted_job", "album_places", "album_formats", "album_upgrades"):
                 continue
             if k in ("parallel_max", "sync_every_hours", "full_scan_every_days"):
                 v = max(0, int(float(v or 0)))
@@ -383,7 +388,7 @@ class Engine:
 
     def start(self, kind: str, albums: Optional[list] = None, scheduled: bool = False) -> bool:
         """kind: scan (the album lists) | read (album pages: `albums`, or the ticked ones) |
-        sync | scan+sync."""
+        sync | scan+sync | check (the download folder, for downloaded files deleted since)."""
         if self.busy:
             return False
         self.stop_requested = False
@@ -394,7 +399,7 @@ class Engine:
             # crash, reboot or app restart carries on (and resumes its .part files) at next start
             self.catalog.save_settings({"interrupted_job": kind})
         what = {"scan": "scan of the album lists", "read": "reading album pages", "sync": "sync",
-                "scan+sync": "scan + sync"}.get(kind, kind)
+                "scan+sync": "scan + sync", "check": "check of the download folder"}.get(kind, kind)
         log.info("Starting %s (%s)", what, "scheduled" if scheduled else "requested")
         self.task = asyncio.create_task(self._run(kind, albums))
         return True
@@ -449,17 +454,20 @@ class Engine:
         started = time.time()
         summary: dict = {}
         try:
-            async with self._client() as client:
-                robots = await self._robots(client)
-                if kind in ("scan", "scan+sync"):
-                    self.job["phase"] = "reading the album lists"
-                    summary["scan"] = await self._scanner(client, robots).scan_site(self.folder_name)
-                if kind == "read" and not self.stop_requested:
-                    slugs = albums if albums else self.catalog.selected_albums()
-                    self.job["phase"] = "reading album pages"
-                    summary["read"] = await self._scanner(client, robots).read_albums(slugs)
-                if kind in ("sync", "scan+sync") and not self.stop_requested:
-                    summary["sync"] = await self._sync(client, robots)
+            if kind == "check":                  # only the disk: no requests
+                summary["check"] = await self._check_folder()
+            else:
+                async with self._client() as client:
+                    robots = await self._robots(client)
+                    if kind in ("scan", "scan+sync"):
+                        self.job["phase"] = "reading the album lists"
+                        summary["scan"] = await self._scanner(client, robots).scan_site(self.folder_name)
+                    if kind == "read" and not self.stop_requested:
+                        slugs = albums if albums else self.catalog.selected_albums()
+                        self.job["phase"] = "reading album pages"
+                        summary["read"] = await self._scanner(client, robots).read_albums(slugs)
+                    if kind in ("sync", "scan+sync") and not self.stop_requested:
+                        summary["sync"] = await self._sync(client, robots)
             self.job["phase"] = "stopped" if self.stop_requested else "done"
         except Exception as e:
             log.exception("job failed: %r", e)
@@ -660,6 +668,9 @@ class Engine:
                 if n:
                     log.info("Dated %d folders to their newest file", n)
             if not self.stop_requested and not dl.paused:
+                manifest.commit()
+                self.catalog.commit()
+                await self._finish_upgrades()
                 await self._check_leftovers()
             best = self.gate.remembered_max()
             if best:
@@ -710,6 +721,149 @@ class Engine:
             log.info("%d files of %s are missing from the download folder - the next sync gets them again",
                      len(gone), slug)
         return {"slug": slug, "missing": gone}
+
+    async def _check_folder(self) -> dict:
+        """Every downloaded file is looked for on disk; the ones deleted since are marked not
+        downloaded, so their albums show it and the next sync gets them again."""
+        self.job["phase"] = "checking the download folder"
+        root = self.data_dir
+        rows = self.catalog.saved_files()
+        self.job["message"] = f"{len(rows):,} downloaded files"
+
+        def look() -> list:
+            gone = []
+            for url, rel, album, *_ in rows:
+                if self.stop_requested:
+                    break
+                if not os.path.isfile(os.path.join(root, *rel.split("/"))):
+                    gone.append((url, rel, album))
+            return gone
+
+        gone = await asyncio.to_thread(look)
+        if gone:
+            self.catalog.forget_local(u for u, _, _ in gone)
+        albums = sorted({a for _, _, a in gone})
+        self._sel_cache = None
+        self.job["message"] = (f"{len(gone):,} of {len(rows):,} downloaded files are missing ({len(albums):,} "
+                               f"{'album' if len(albums) == 1 else 'albums'}) - the next sync downloads them again"
+                               if gone else f"all {len(rows):,} downloaded files are there")
+        if self.stop_requested:
+            log.info("Check of the download folder stopped")
+        elif gone:
+            log.info("Check of the download folder: %d of %d downloaded files are missing (%d albums) - "
+                     "the next sync downloads them again", len(gone), len(rows), len(albums))
+            named = self.catalog.albums_by_slug(albums)
+            for a in albums[:20]:
+                n = sum(1 for _, _, x in gone if x == a)
+                log.info("  %s: %d %s missing", named[a]["name"] if a in named else a, n, "file" if n == 1 else "files")
+            if len(albums) > 20:
+                log.info("  ... and %d more albums", len(albums) - 20)
+        else:
+            log.info("Check of the download folder: all %d downloaded files are there", len(rows))
+        return {"files": len(rows), "missing": len(gone), "albums": len(albums)}
+
+    # ------------------------------------------------------------------ upgrading an album
+    @staticmethod
+    def _quality(ext: str) -> int:
+        """Lower is better (BEST_ORDER: FLAC, WAV ... MP3)."""
+        return BEST_ORDER.index(ext) if ext in BEST_ORDER else len(BEST_ORDER)
+
+    def upgrade_info(self, slug: str, settings: Optional[dict] = None) -> dict:
+        """What an album's window offers: the audio formats it has that are better than the best one
+        downloaded (`better`), and a waiting upgrade (`pending`)."""
+        s = settings or self.catalog.settings()
+        a = self.catalog.album(slug)
+        pending = (s.get("album_upgrades") or {}).get(slug)
+        have = {r[3] for r in self.catalog.saved_files(slug) if r[4] != "art" and r[3] in AUDIO_EXTENSIONS}
+        better = []
+        if a and have:
+            best = min(self._quality(e) for e in have)
+            better = sorted((f for f in a["formats"] if f in AUDIO_EXTENSIONS and self._quality(f) < best),
+                            key=self._quality)
+        return {"have": sorted(have, key=self._quality), "better": better,
+                "pending": pending or None}
+
+    def upgrade_album(self, slug: str, fmt: str) -> dict:
+        """Get an album in a better format and delete the old one: the album gets its own formats
+        setting (just `fmt`, plus its images if it had them) and is ticked; once a sync has downloaded
+        every new file, the files of the old formats are deleted (_finish_upgrades). fmt "" cancels a
+        waiting upgrade and puts the album's formats back."""
+        a = self.catalog.album(slug)
+        if a is None:
+            raise KeyError("no such album")
+        s = self.catalog.settings()
+        ups = dict(s.get("album_upgrades") or {})
+        own = dict(s.get("album_formats") or {})
+        fmt = str(fmt or "").strip().lower()
+        if not fmt:
+            u = ups.pop(slug, None)
+            if u is None:
+                return {"slug": slug, "pending": None}
+            own.pop(slug, None)
+            if u.get("formats"):
+                own[slug] = u["formats"]
+            self.catalog.save_settings({"album_upgrades": ups, "album_formats": own})
+            self._sel_cache = None
+            log.info("Upgrade of %s cancelled - its formats are as before", a["name"])
+            return {"slug": slug, "pending": None}
+        fmt = "." + fmt.lstrip(".")
+        info = self.upgrade_info(slug, s)
+        if not info["have"]:
+            raise ValueError("nothing of this album is downloaded yet - pick its formats instead")
+        if fmt not in info["better"]:
+            raise ValueError(f"{fmt[1:].upper()} isn't a better format this album has")
+        art = "art" in album_wants(s, slug, a["formats"])
+        before = ups.get(slug, {}).get("formats", own.get(slug, ""))
+        own[slug] = f"first:{fmt}" + (",art" if art else "")
+        ups[slug] = {"to": fmt, "from": [e for e in info["have"] if e != fmt], "formats": before,
+                     "since": time.time()}
+        self.catalog.save_settings({"album_upgrades": ups, "album_formats": own})
+        self.catalog.select(ALBUM + slug, True)
+        self._sel_cache = None
+        log.info("Upgrade: %s gets %s; its %s files are deleted once the next sync has them all",
+                 a["name"], fmt[1:].upper(), ", ".join(e[1:].upper() for e in ups[slug]["from"]))
+        return {"slug": slug, "pending": ups[slug]}
+
+    async def _finish_upgrades(self) -> None:
+        """After a sync: albums whose upgrade is fully downloaded lose the files of their old format."""
+        from . import cleanup
+        s = self.catalog.settings()
+        ups = dict(s.get("album_upgrades") or {})
+        if not ups:
+            return
+        changed = False
+        for slug, u in list(ups.items()):
+            a = self.catalog.album(slug)
+            if a is None:
+                ups.pop(slug)
+                changed = True
+                continue
+            if not self.catalog.album_totals(slug, a["formats"], s)["downloaded"]:
+                continue
+            want = album_wants(s, slug, a["formats"])
+            old = set(u.get("from") or ()) - want
+            files = [{"path": rel, "url": url, "size": size or 0, "reason": "replaced"}
+                     for url, rel, _al, ext, kind, size in self.catalog.saved_files(slug)
+                     if kind != "art" and ext in old]
+            res = await asyncio.to_thread(cleanup.delete, self.data_dir, files)
+            gone = set(res["deleted"])
+            why = f"Replaced by {u['to'][1:].upper()}"
+            for f in files:
+                if f["path"] in gone:
+                    self.catalog.add_change(None, "deleted", f["path"], f["size"], why)
+            self.catalog.forget_local([f["url"] for f in files if f["path"] in gone])
+            if res["errors"]:
+                log.warning("Upgrade of %s: %d old files could not be deleted: %s", a["name"],
+                            len(res["errors"]), "; ".join(res["errors"][:5]))
+                continue                        # tried again after the next sync
+            log.info("Upgrade of %s done: %s - deleted %d %s files (%s)", a["name"], u["to"][1:].upper(),
+                     len(gone), "/".join(e[1:].upper() for e in sorted(old)) or "old", fmt_bytes(res["bytes"]))
+            ups.pop(slug)
+            changed = True
+        if changed:
+            self.catalog.save_settings({"album_upgrades": ups})
+        self.catalog.commit()
+        self._sel_cache = None
 
     async def read_album_now(self, slug: str) -> dict:
         """Read one album's page right away (opening an album in the page), outside the job queue."""

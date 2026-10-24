@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.0.4] - 2026-10-24
+
+### New
+- Pick several album types at once in the type filter (e.g. Gamerip and Arrangement), or "No type".
+  The platform counts follow the picked types.
+- **Check download folder** (☰ menu) looks for downloaded files you deleted in every album at once;
+  the next sync downloads them again. It only reads your disk.
+- **Upgrade to FLAC** (or another better format) in an album's window: the next sync downloads the
+  better format, then deletes the album's files of the old format. Clean up leaves the old files
+  alone meanwhile; **Cancel upgrade** puts the album's formats back.
+
 ## [1.0.3] - 2026-10-24
 
 ### Improved

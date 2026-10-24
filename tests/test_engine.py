@@ -2,7 +2,7 @@
 import os
 import time
 
-from conftest import BIRD, SMW, album, file_status, log_lines, on_disk, scan, select, sync, wait
+from conftest import BIRD, SMW, album, albums, file_status, log_lines, on_disk, scan, select, sync, wait
 
 SMW_MP3 = {"Super Mario World/01. Nintendo Logo.mp3", "Super Mario World/02. Title Screen.mp3",
            "Super Mario World/03. Overworld.mp3"}
@@ -133,6 +133,68 @@ def test_check_files_finds_deleted_ones_for_the_next_sync(site, app_factory):
     st = sync(c)
     assert st["sync"]["new"] == 1 and "Super Mario World/03. Overworld.mp3" in on_disk(c.data)
     assert c.post("/api/album/check", json={"slug": "nope"}).status_code == 404
+
+
+def test_check_download_folder_finds_deleted_files_of_every_album(site, app_factory):
+    c = app_factory(site)
+    first_sync(c)
+    select(c, "a:persona-5")
+    sync(c)
+    os.remove(c.data / "Super Mario World" / "03. Overworld.mp3")
+    os.remove(c.data / "PERSONA5 ORIGINAL SOUNDTRACK" / "Cover.jpg")
+    site.reset_log()
+    assert c.post("/api/check").status_code == 200
+    st = wait(c)
+    assert not site.requests, "checking the folder only looks at the disk"
+    assert st["job"]["kind"] == "check" and "2 of 9 downloaded files are missing (2 albums)" in st["job"]["message"]
+    assert not album(c, SMW)["album"]["downloaded"] and not album(c, "persona-5")["album"]["downloaded"]
+    assert albums(c, show="partly").keys() == {SMW, "persona-5"}
+    st = sync(c)
+    assert st["sync"]["new"] == 2
+    assert "Super Mario World/03. Overworld.mp3" in on_disk(c.data)
+    assert c.post("/api/check").status_code == 200
+    assert "all 9 downloaded files are there" in wait(c)["job"]["message"]
+
+
+def test_upgrading_an_album_replaces_its_old_format(site, app_factory):
+    c = app_factory(site)
+    first_sync(c)
+    up = album(c, SMW)["upgrade"]
+    assert up == {"have": [".mp3"], "better": [".flac"], "pending": None}
+    assert album(c, "sonic-the-hedgehog-genesis")["upgrade"]["better"] == []
+    r = c.post("/api/album/upgrade", json={"slug": SMW, "format": "flac"})
+    assert r.status_code == 200 and r.json()["pending"]["from"] == [".mp3"]
+    d = album(c, SMW)
+    assert d["upgrade"]["pending"]["to"] == ".flac" and d["formats"] == "first:.flac,art"
+    assert not d["album"]["downloaded"]
+    # meanwhile the MP3s are not offered to Clean up: the sync replaces them
+    assert c.get("/api/cleanup").json()["files"] == []
+    st = sync(c)
+    assert st["sync"]["new"] == 3
+    files = on_disk(c.data)
+    assert files == {p.replace(".mp3", ".flac") for p in SMW_MP3} | {"Super Mario World/Cover.jpg"}
+    d = album(c, SMW)
+    assert d["album"]["downloaded"] and d["upgrade"] == {"have": [".flac"], "better": [], "pending": None}
+    assert any("Upgrade of Super Mario World done" in m for m in log_lines(st))
+    deleted = c.get("/api/changes", params={"kind": "deleted"}).json()["files"]
+    assert len(deleted) == 3 and "Replaced by FLAC" in str(deleted)
+    # nothing left for Clean up
+    assert st["leftovers"]["files"] == 0
+
+
+def test_an_upgrade_can_be_cancelled_and_refuses_worse_formats(site, app_factory):
+    c = app_factory(site, settings={"formats": "all:.flac,art"})
+    first_sync(c)
+    assert album(c, SMW)["upgrade"]["better"] == []
+    c.post("/api/settings", json={"formats": "mp3"})
+    assert c.post("/api/album/upgrade", json={"slug": SMW, "format": "mp3"}).status_code == 400
+    assert c.post("/api/album/upgrade", json={"slug": "nope", "format": "flac"}).status_code == 404
+    c2 = app_factory(site, name="other")
+    first_sync(c2)
+    assert c2.post("/api/album/upgrade", json={"slug": SMW, "format": "flac"}).status_code == 200
+    assert c2.post("/api/album/upgrade", json={"slug": SMW, "format": ""}).json()["pending"] is None
+    d = album(c2, SMW)
+    assert d["formats"] == "" and d["upgrade"]["pending"] is None and d["album"]["downloaded"]
 
 
 def test_files_already_in_the_folder_are_adopted(site, app_factory):

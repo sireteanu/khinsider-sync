@@ -44,32 +44,76 @@ const FMT = (ext) => ext === "art" ? "Image" : ext.replace(/^\./, "").toUpperCas
 
 /* ---------------------------------------------------------------- library: platforms */
 /* view: which albums the list shows. platform "" = all, "-" = albums without a platform */
-let view = { platform: "", q: "", type: "", show: "all", sort: "name", dir: 1 };
+let view = { platform: "", q: "", types: [], show: "all", sort: "name", dir: 1 };
 try { view = Object.assign(view, JSON.parse(localStorage.getItem("view")) || {}, { q: "" }); } catch (e) {}
+if (typeof view.type === "string") { if (view.type && !view.types.length) view.types = [view.type]; delete view.type; }  // before 1.0.4
+if (!Array.isArray(view.types)) view.types = [];
 const saveView = () => { try { localStorage.setItem("view", JSON.stringify(view)); } catch (e) {} };
 let platforms = [];                 // from /api/platforms
 let noPlatform = 0;
 let allCount = null;              // albums of the chosen type (all of them without a type)
 
 async function loadPlatforms() {
-  const d = await api("/api/platforms?" + new URLSearchParams({ type: view.type }));
+  const d = await api("/api/platforms?" + new URLSearchParams({ type: view.types.join(",") }));
   platforms = d.platforms;
   noPlatform = d.no_platform;
   allCount = d.total;
-  const sel = $("#f-type");
-  const cur = view.type;
-  sel.innerHTML = '<option value="">Every type</option>';
-  for (const [t, n] of d.types) {
-    const o = document.createElement("option");
-    o.value = t === "Other" ? "" : t;
-    if (t === "Other") continue;
-    o.textContent = `${t} (${num(n)})`;
-    sel.append(o);
-  }
-  sel.value = cur;
+  typeMenu(d.types);
   renderPlatforms();
   return d;
 }
+
+/* the album-type filter: tick any number of types ("Other" = albums without a type) */
+let typeKinds = "";
+function typeText() {
+  const t = view.types;
+  $("#f-type-text").textContent = !t.length ? "Every type" : t.length <= 2 ? t.join(", ") : `${t.length} types`;
+  $("#f-type").classList.toggle("on", t.length > 0);
+}
+function typeMenu(kinds) {
+  const known = new Set(kinds.map(([t]) => t));
+  const keep = view.types.filter((t) => known.has(t));
+  if (keep.length !== view.types.length && kinds.length) { view.types = keep; saveView(); }
+  typeText();
+  const sig = JSON.stringify(kinds);
+  if (sig === typeKinds) {                  // same menu: only the ticks
+    for (const i of document.querySelectorAll("#f-type-list input")) i.checked = view.types.includes(i.value);
+    return;
+  }
+  typeKinds = sig;
+  const box = $("#f-type-list");
+  box.innerHTML = "";
+  for (const [t, n] of kinds) {
+    const l = document.createElement("label");
+    l.className = "check";
+    l.innerHTML = `<input type="checkbox"><span></span><span class="muted"></span>`;
+    const i = $("input", l);
+    i.value = t;
+    i.checked = view.types.includes(t);
+    l.children[1].textContent = t === "Other" ? "No type" : t;
+    l.children[2].textContent = num(n);
+    i.addEventListener("change", () => {
+      const on = new Set(view.types);
+      if (i.checked) on.add(t); else on.delete(t);
+      view.types = kinds.map(([k]) => k).filter((k) => on.has(k));
+      typesChanged();
+    });
+    box.append(l);
+  }
+}
+function typesChanged() {
+  saveView();
+  typeText();
+  loadPlatforms();
+  reload();
+}
+$("#f-type-all").addEventListener("click", () => {
+  view.types = [];
+  for (const i of document.querySelectorAll("#f-type-list input")) i.checked = false;
+  typesChanged();
+});
+document.addEventListener("click", (e) => { if (!e.target.closest("#f-type")) $("#f-type").open = false; });
+$("#f-type").addEventListener("keydown", (e) => { if (e.key === "Escape") { $("#f-type").open = false; $("#f-type summary").focus(); } });
 
 function renderPlatforms() {
   const box = $("#plat-list");
@@ -181,7 +225,7 @@ function blankRow(el) {                 // a row whose album is still on its way
 }
 
 function query(offset, limit = PAGE) {
-  const p = new URLSearchParams({ platform: view.platform, q: view.q, type: view.type, show: view.show,
+  const p = new URLSearchParams({ platform: view.platform, q: view.q, type: view.types.join(","), show: view.show,
     sort: view.sort, dir: view.dir, offset, limit });
   return api("/api/albums?" + p);
 }
@@ -333,7 +377,6 @@ $("#search").addEventListener("input", () => {
     reload();
   }, 250);
 });
-$("#f-type").addEventListener("change", (e) => { view.type = e.target.value; saveView(); loadPlatforms(); reload(); });
 $("#f-show").addEventListener("change", (e) => { view.show = e.target.value; saveView(); reload(); });
 
 /* ---------------------------------------------------------------- album dialog */
@@ -386,6 +429,7 @@ function showAlbum(d) {
     catch (err) { alert("Not saved: " + err.message); }
     openAlbum(a.slug, false); refreshList(); poll(true);
   };
+  showUpgrade(a, d.upgrade);
   const place = $("#al-place");
   place.value = d.dir;
   place.dataset.orig = d.dir;
@@ -418,6 +462,46 @@ function showAlbum(d) {
     body.append(tr);
   }
 }
+/* upgrading: get a downloaded album in a better format; the sync deletes the old one afterwards */
+function showUpgrade(a, up) {
+  const box = $("#al-upgrade");
+  box.innerHTML = "";
+  const list = (exts) => exts.map(FMT).join(" and ");
+  const text = document.createElement("p");
+  const btn = (label, cls, fn) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "btn small " + cls; b.textContent = label;
+    b.addEventListener("click", fn);
+    box.append(b);
+    return b;
+  };
+  box.append(text);
+  if (up && up.pending) {
+    const p = up.pending;
+    text.innerHTML = `<b></b> `;
+    text.firstChild.textContent = `Upgrading to ${FMT(p.to)}:`;
+    text.append(`the next sync downloads it, then deletes the ${list(p.from)} files of this album.`);
+    const now = btn("Sync now", "", async () => { now.disabled = true; await startJob("/api/sync"); });
+    now.disabled = !!(lastStatus && lastStatus.busy);
+    btn("Cancel upgrade", "ghost", () => upgrade(a, ""));
+  } else if (up && up.better.length) {
+    text.textContent = `You have this album as ${list(up.have)}. khinsider also has it as ${list(up.better)}.`;
+    for (const f of up.better.slice(0, 3)) btn(`Upgrade to ${FMT(f)}`, "", () => upgrade(a, f, up.have));
+  }
+  box.hidden = !(up && (up.pending || up.better.length));
+}
+async function upgrade(a, fmt, have = []) {
+  if (fmt) {
+    const old = have.filter((e) => e !== fmt).map(FMT).join(" and ");
+    if (!confirm(`Get “${a.name}” as ${FMT(fmt)}?\n\nThe next sync downloads it; once every ${FMT(fmt)} file is in, `
+      + `the ${old} files of this album are deleted. Its images stay.`)) return;
+  }
+  try { await api("/api/album/upgrade", { method: "POST", body: { slug: a.slug, format: fmt } }); }
+  catch (e) { alert("Could not change it: " + e.message); return; }
+  await openAlbum(a.slug, false);
+  refreshList(); loadPlatforms(); poll(true);
+}
+
 async function readAlbum(slug) {
   const btn = $("#al-read");
   btn.disabled = true;
@@ -497,12 +581,13 @@ function renderStatus(st) {
   const syncing = st.sync && job && job.phase === "downloading" && busy && !st.sync.outage;
   const outage = busy && st.sync && st.sync.outage;
   pill.className = "pill " + (outage ? "warn" : busy ? "busy" : st.sync && st.sync.paused ? "warn" : "idle");
-  pill.textContent = outage ? "Waiting for site" : busy ? ({ scan: "Scanning", read: "Reading" }[job.kind] || "Syncing") :
+  pill.textContent = outage ? "Waiting for site" : busy ? ({ scan: "Scanning", read: "Reading", check: "Checking" }[job.kind] || "Syncing") :
     (st.sync && st.sync.paused ? "Paused" : "Idle");
   renderOutage(outage);
   const sel = st.selection;
   $("#btn-scan").disabled = busy;
   $("#btn-read").disabled = busy || !sel.albums;
+  $("#btn-check").disabled = busy;
   $("#btn-sync").disabled = busy || !sel.albums;
   $("#btn-sync").title = sel.albums ? "Download new, incomplete and changed files of the ticked albums"
     : "Tick the albums or platforms you want first";
@@ -529,7 +614,8 @@ function renderStatus(st) {
   // job
   const line = $("#job-line");
   if (job) {
-    const what = { scan: "Scan", read: "Reading album pages", sync: "Sync", "scan+sync": "Scan and sync" }[job.kind] || job.kind;
+    const what = { scan: "Scan", read: "Reading album pages", sync: "Sync", "scan+sync": "Scan and sync",
+      check: "Check of the download folder" }[job.kind] || job.kind;
     line.textContent = busy
       ? `${what}: ${outage ? "waiting for khinsider" : job.phase} - started ${clock(job.started)}`
       : `Last ${what.toLowerCase()} ${job.phase === "done" ? "finished" : job.phase} at ${clock(job.finished || job.started)}`
@@ -671,12 +757,14 @@ function renderEta(st, busy) {
 }
 
 
+let lastStatus = null;
 async function poll(once = false) {
   clearTimeout(pollTimer);
   let busy = false;
   try {
     const st = await api(`/api/status?log_since=${lastLog}`);
     busy = st.busy;
+    lastStatus = st;
     renderStatus(st);
   } catch (e) {
     $("#job-line").textContent = "Lost contact with Khinsider Sync - is it still running?";
@@ -697,6 +785,7 @@ $("#btn-scan-empty").addEventListener("click", () => startJob("/api/scan"));
 $("#btn-sync").addEventListener("click", () => startJob("/api/sync"));
 $("#btn-stop").addEventListener("click", () => startJob("/api/stop"));
 $("#btn-read").addEventListener("click", () => startJob("/api/read", {}));
+$("#btn-check").addEventListener("click", () => startJob("/api/check", {}));
 $("#btn-clear-sel").addEventListener("click", async () => {
   if (!confirm("Untick every album and platform? Files already downloaded stay where they are.")) return;
   await api("/api/selection/clear", { method: "POST" });
@@ -1136,7 +1225,7 @@ themeLabel();
 
 /* ---------------------------------------------------------------- start */
 $("#search").value = "";
-$("#f-type").value = view.type;
+typeText();
 if (view.show === "synced") view.show = "downloaded";          // the name before 1.0.2
 $("#f-show").value = view.show;
 loadPlatforms().then(() => reload()).catch(() => reload()).finally(() => poll());

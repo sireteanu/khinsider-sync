@@ -26,6 +26,11 @@ SORTS = ("name", "year", "added", "new", "size", "synced")
 SHOWS = ("all", "ticked", "downloaded", "partly", "notdownloaded", "failed", "unread")
 
 
+def parse_types(text: str) -> tuple:
+    """The type filter: "Gamerip,Soundtrack" -> ("Gamerip", "Soundtrack"); "Other" = albums without a type."""
+    return tuple(sorted({t.strip() for t in str(text or "").split(",") if t.strip()}))
+
+
 def album_json(e: Engine, a: dict, rules: dict, selected: set, settings: dict, names: dict) -> dict:
     t = e.catalog.album_totals(a["slug"], a["formats"], settings) if a["read"] else \
         {"files": 0, "bytes": 0, "synced": 0, "synced_bytes": 0, "failed": 0, "downloaded": False,
@@ -104,8 +109,9 @@ def create_app(engine_factory, password: Optional[str] = None, on_restart=None, 
     # ---------------------------------------------------------------- browsing
     @app.get("/api/platforms")
     async def platforms(type: str = ""):
-        """Platforms with their album counts - of one album type when `type` is given, so the
-        list matches what the album filter shows."""
+        """Platforms with their album counts - of the album types in `type` (comma separated) when
+        given, so the list matches what the album filter shows."""
+        types = parse_types(type)
         e = eng()
         s = e.catalog.settings()
         rules = e.catalog.rules()
@@ -115,7 +121,7 @@ def create_app(engine_factory, password: Optional[str] = None, on_restart=None, 
         none = 0
         for _slug, plats, kind in e.catalog.index():
             kinds[kind or "Other"] += 1
-            if type and kind != type:
+            if types and (kind or "Other") not in types:
                 continue
             count.update(plats)
             none += not plats
@@ -123,7 +129,7 @@ def create_app(engine_factory, password: Optional[str] = None, on_restart=None, 
         out = [{"slug": p, "name": names.get(p, p), "albums": count.get(p, 0), "state": states.get(p, "off")}
                for p in names if count.get(p, 0) or states.get(p)]
         out.sort(key=lambda x: x["name"].casefold())
-        total = sum(1 for _s, _p, k in e.catalog.index() if not type or k == type)
+        total = sum(1 for _s, _p, k in e.catalog.index() if not types or (k or "Other") in types)
         return {"platforms": out, "types": sorted(kinds.items(), key=lambda kv: -kv[1]),
                 "no_platform": none, "total": total, "platform_types": s.get("platform_types") or []}
 
@@ -149,9 +155,15 @@ def create_app(engine_factory, password: Optional[str] = None, on_restart=None, 
         for word in q.split():
             where.append("(name LIKE ? OR title LIKE ? OR slug LIKE ?)")
             args += [f"%{word}%"] * 3
-        if type:
-            where.append("type=?")
-            args.append(type)
+        if type:                                  # a tuple of types (parse_types)
+            cond = []
+            named = [t for t in type if t != "Other"]
+            if named:
+                cond.append("type IN (%s)" % ",".join("?" * len(named)))
+                args += named
+            if "Other" in type:
+                cond.append("(type IS NULL OR type='')")
+            where.append("(" + " OR ".join(cond) + ")")
         w = (" WHERE " + " AND ".join(where)) if where else ""
         with e.catalog.lock:
             rows = e.catalog.db.execute(f"SELECT {', '.join(e.catalog.COLS)} FROM albums{w}", args).fetchall()
@@ -203,6 +215,7 @@ def create_app(engine_factory, password: Optional[str] = None, on_restart=None, 
             raise HTTPException(400, "show must be one of " + ", ".join(SHOWS))
         rules = e.catalog.rules()
         s = e.catalog.settings()
+        type = parse_types(type)
         key = (e.catalog.version, tuple(sorted(rules.items())), str(s.get("formats")), str(s.get("album_formats")),
                bool(s.get("album_art")), tuple(s.get("platform_types") or ()), platform, q, type, show, sort, dir)
         items = album_view(e, key, platform, q, type, show, sort, dir)
@@ -238,6 +251,7 @@ def create_app(engine_factory, password: Optional[str] = None, on_restart=None, 
         return {"album": album_json(e, a, rules, selected, s, e.catalog.platform_names()),
                 "dir": e.album_dir(a, s), "place": places.get(slug, ""), "files": files,
                 "formats": (s.get("album_formats") or {}).get(slug, ""), "default_formats": s.get("formats"),
+                "upgrade": e.upgrade_info(slug, s),
                 "page": f"{e.base}game-soundtracks/album/{slug}"}
 
     @app.post("/api/album/read")
@@ -255,6 +269,23 @@ def create_app(engine_factory, password: Optional[str] = None, on_restart=None, 
             return eng().check_album(slug)
         except ValueError as exc:
             raise HTTPException(404, str(exc))
+
+    @app.post("/api/album/upgrade")
+    async def album_upgrade(slug: str = Body(...), format: str = Body("")):
+        """Replace an album's files with a better format ("" = cancel a waiting upgrade)."""
+        try:
+            return eng().upgrade_album(slug, format)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc.args[0]))
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+
+    @app.post("/api/check")
+    async def check_folder():
+        """Look through the download folder for downloaded files that were deleted."""
+        if not eng().start("check"):
+            raise HTTPException(409, "already busy")
+        return {"ok": True}
 
     @app.post("/api/select")
     async def select(key: str = Body(...), include: bool = Body(...)):

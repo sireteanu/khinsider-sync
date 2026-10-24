@@ -19,7 +19,8 @@ is downloaded. Afterwards you see every album, with the platforms on the left.
 
 - Type in **Find an album** to search everything (name or address).
 - Click a platform on the left to see its albums. Use **Every type** to show only gamerips,
-  soundtracks, arrangements … - the platform counts on the left then count only that type.
+  soundtracks, arrangements … - tick as many types as you like. The platform counts on the left then
+  count only those types.
 - The list holds every album of what you picked: just scroll, there is no "Show more".
 - Tick the box in front of an album to sync it.
 - Tick the box in front of a **platform** (or "Sync every album of …" above its list) to sync every
@@ -68,6 +69,13 @@ pages instead of files (too many downloads), the sync pauses; the next one finis
 khinsider doesn't change albums once they're up, so once an album is downloaded, syncs leave it
 alone - they don't ask khinsider about it or look through its files again. If you deleted some of
 its files by hand, open the album and click **Check files**: the next sync gets the missing ones.
+To check every album at once, use **Check download folder** in the ☰ menu (it only looks at your
+disk; it doesn't ask khinsider anything).
+
+**Better quality later**: if you downloaded an album as MP3 and khinsider also has it as FLAC, its
+window offers **Upgrade to FLAC**. The next sync downloads the FLAC files and, once they are all
+there, deletes the album's MP3s (the images stay). Until then you keep the MP3s.
+**Cancel upgrade** undoes it.
 To pick up tracks khinsider added to an album later, open it and click **Read album page**.
 
 ## 7. Keep it up to date

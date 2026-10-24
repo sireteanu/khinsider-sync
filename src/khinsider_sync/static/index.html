@@ -39,6 +39,10 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h10l4 4v12H5zM14 4v5h5M8 12h8M8 15h8M8 18h5" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
           <span><b>Read ticked album pages</b><small>Track lists and sizes now, without downloading</small></span>
         </button>
+        <button id="btn-check" role="menuitem">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h7l2 2h9v11H3zM9 13.5l2 2 4-4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+          <span><b>Check download folder</b><small>Finds downloaded files you deleted; the next sync gets them again</small></span>
+        </button>
         <button id="btn-theme" role="menuitem" class="theme-toggle">
           <svg class="sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/></svg>
           <svg class="moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z"/></svg>
@@ -84,7 +88,13 @@
     <div class="albums-pane">
       <div class="toolbar">
         <input id="search" type="search" placeholder="Find an album, e.g. Chrono Trigger" autocomplete="off" aria-label="Find an album">
-        <select id="f-type" aria-label="Album type"><option value="">Every type</option></select>
+        <details id="f-type" class="multi">
+          <summary aria-label="Album types"><span id="f-type-text">Every type</span></summary>
+          <div class="multi-pop" role="group" aria-label="Album types">
+            <button id="f-type-all" class="btn small ghost" type="button">Every type</button>
+            <div id="f-type-list" class="multi-list"></div>
+          </div>
+        </details>
         <select id="f-show" aria-label="Show">
           <option value="all">All albums</option><option value="ticked">Ticked</option>
           <option value="downloaded">Downloaded</option><option value="partly">Partly downloaded</option>
@@ -170,6 +180,7 @@
       <option value="first:.flac,.mp3,art">FLAC, else MP3 (only these two)</option>
       <option value="all:.flac,.mp3,art">FLAC and MP3</option>
     </select></label>
+  <div id="al-upgrade" class="al-upgrade" hidden></div>
   <label class="field al-place"><span>Saved as</span>
     <span class="unit"><input id="al-place" spellcheck="false" autocomplete="off"><button id="al-place-save" class="btn small" type="button">Save</button></span>
     <small id="al-place-hint">The album's folder in the download folder. Type another (e.g. Soundtracks/Persona 5) and Save; clear it to go back.</small></label>

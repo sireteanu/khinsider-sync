@@ -45,7 +45,7 @@ modest, don't sync the whole site, and consider [donating](https://downloads.khi
 | Area | What it does |
 |---|---|
 | Catalog | **Scan site** reads khinsider's album lists (about 230 pages for 106,000+ albums: name, platforms, type, year) and its platform list. No album pages and no music are requested while scanning. |
-| Browsing | Platforms on the left with album counts (of the chosen album type when the type filter is set); the album list - every album of the view in one scrolling list, fetched a slice at a time as you scroll - with search, type filter (Gamerip, Soundtrack, Arrangement …), "Ticked / With synced files / With problems" filters, and sorting by name, year, size or how much is synced. |
+| Browsing | Platforms on the left with album counts (of the chosen album type when the type filter is set); the album list - every album of the view in one scrolling list, fetched a slice at a time as you scroll - with search, type filter (tick one or several: Gamerip, Soundtrack, Arrangement …; "No type" for albums without one), "Ticked / With synced files / With problems" filters, and sorting by name, year, size or how much is synced. |
 | Selection | Tick an album, or tick a platform for **every album of it, including ones added later** (optionally only some album types, e.g. gamerips). Untick single albums of a ticked platform as exceptions. Ticks are saved immediately. |
 | Album details | Click an album: its tracks per disc with every format and size, its images, what is synced, where it is saved. The album's page is read the first time you open it. |
 | Formats | **Your own list, in your order**: tick the formats you want (and the album images) and move them up or down; an album gets either only the first ticked format it has, or every ticked one (e.g. FLAC *and* MP3). Files download in that order - every FLAC file of the sync before the first MP3. Quick picks: MP3 (default), FLAC else MP3, FLAC and MP3, best quality (FLAC → WAV → … → M4A → OPUS → OGG → MP3), everything. Any album can have **its own formats** (e.g. FLAC for favourites). Album images (covers, scans) are saved too unless you turn that off, optionally in an `Art` folder. |
@@ -53,7 +53,8 @@ modest, don't sync the whole site, and consider [donating](https://downloads.khi
 | Getting through | Requests look like Chrome (its TLS fingerprint and headers, via curl_cffi) and name khinsider as the Referer, as khi-explorer does, so Cloudflare's bot protection lets them through. Can be turned off. |
 | Folders | One folder per album, named after the album (clashing names get the type and year added). Optionally grouped by platform, type or year. **Saved as** puts one album anywhere you like. Changing either **moves** what you already have instead of downloading it again. |
 | Sync | Reads each ticked album's page once (the first time it's synced or opened), then downloads what's missing or half-finished (`.part`, resumed). khinsider doesn't change albums once they're up, so **an album that is downloaded is done**: later syncs skip it without a request or a look at the disk. |
-| Downloaded albums | The album list marks every album as **Downloaded** or **Partly downloaded** (with the date in its tooltip and window), the filter shows Downloaded / Partly downloaded / Not downloaded, and the top strip counts "12 of 13 albums downloaded". **Check files** in an album's window looks for files you deleted; the next sync downloads those again. |
+| Downloaded albums | The album list marks every album as **Downloaded** or **Partly downloaded** (with the date in its tooltip and window), the filter shows Downloaded / Partly downloaded / Not downloaded, and the top strip counts "12 of 13 albums downloaded". **Check files** in an album's window looks for files you deleted; **Check download folder** (☰ menu) does that for every downloaded album at once - disk only, no requests. The next sync downloads the missing files again. |
+| Upgrading | An album's window offers **Upgrade to FLAC** (or another format the album has that is better than what you downloaded: FLAC, WAV, APE, WV, M4A, OPUS, OGG, AAC, MP3). The album gets that format as its own formats and is ticked; once a sync has every new file, it deletes the album's files of the old format (images stay) and logs them in the Activity log as "Replaced by FLAC". Until then the old files stay and Clean up leaves them alone. **Cancel upgrade** puts the album's formats back. |
 | Dates | Each saved file gets the album's "Date Added" (12:00 local time); folders get the date of their newest file. |
 | Renamed albums | When khinsider moves an album to a new address, its tick, Saved as and folder follow it. |
 | Permissions | Downloaded files and new folders get mode **777** by default (setting). |
@@ -177,7 +178,8 @@ them are the older settings, where images follow `album_art`.
 **Download order**: a sync queues files by their format's place in the list (presets: FLAC, WAV …
 MP3, images last), then album by album and track by track - so with `FLAC, MP3` you get every FLAC
 file of the sync before the first MP3. **Formats for this album** in an
-album's window overrides the setting for that album (stored in `album_formats`).
+album's window overrides the setting for that album (stored in `album_formats`); picking one by hand
+cancels a waiting upgrade.
 
 ### Folders
 
@@ -263,6 +265,7 @@ Stored in the catalog (`settings` table); changed in the Settings dialog or `POS
 | `folder_layout` | `album` | `album`, `platform`, `type` or `year` |
 | `album_places` | `{}` | Saved as: `{album slug: folder}`; changed only with `POST /api/album-place` |
 | `album_formats` | `{}` | Formats for single albums: `{album slug: formats}`; changed only with `POST /api/album-formats` |
+| `album_upgrades` | `{}` | Waiting upgrades: `{album slug: {to, from, formats, since}}` (`formats`: the album's formats before, put back by Cancel); changed only with `POST /api/album/upgrade` |
 | `track_names` | `site` | `site` (khinsider's file names) or `numbered` (`1-01 - Title.flac`) |
 | `art_folder` | `false` | Images in `<album>/Art/` |
 | `impersonate` | `true` | Look like Chrome (needs curl_cffi) |
@@ -318,11 +321,13 @@ All JSON; the page uses nothing else.
 | Method & path | Purpose |
 |---|---|
 | `GET /api/status?log_since=N` | Version, busy, job, catalog counts, selection totals (`albums`, `unread`, `files`, `bytes`, `synced`, `synced_bytes`), scan / album-page progress, sync progress (incl. `bytes_left`, `eta`, `active`), `leftovers`, next run, new log lines |
-| `GET /api/platforms?type=` | `{platforms: [{slug, name, albums, state}], types: [[type, n]], no_platform, total, platform_types}`; with `type`, `albums`, `no_platform` and `total` count only albums of that type (`types` always counts every type) |
-| `GET /api/albums?platform=&q=&type=&show=&sort=&dir=&offset=&limit=` | Albums (`platform` `-` = without platform; `show` `all`/`ticked`/`downloaded`/`partly`/`notdownloaded`/`failed`/`unread`; `sort` `name`/`year`/`added`/`new`/`size`/`synced`) -> `{total, offset, albums}`; the filtered, sorted view is kept between requests (until the catalog, ticks or format settings change), so the page asks for one slice at a time while scrolling |
-| `GET /api/album?slug=` | One album, where it is saved (`dir`, `place`), its files with `wanted` and sync state |
+| `GET /api/platforms?type=` | `{platforms: [{slug, name, albums, state}], types: [[type, n]], no_platform, total, platform_types}`; with `type` (one or more, comma separated; `Other` = no type), `albums`, `no_platform` and `total` count only albums of those types (`types` always counts every type) |
+| `GET /api/albums?platform=&q=&type=&show=&sort=&dir=&offset=&limit=` | Albums (`platform` `-` = without platform; `type` as for platforms; `show` `all`/`ticked`/`downloaded`/`partly`/`notdownloaded`/`failed`/`unread`; `sort` `name`/`year`/`added`/`new`/`size`/`synced`) -> `{total, offset, albums}`; the filtered, sorted view is kept between requests (until the catalog, ticks or format settings change), so the page asks for one slice at a time while scrolling |
+| `GET /api/album?slug=` | One album, where it is saved (`dir`, `place`), its files with `wanted` and sync state, `upgrade: {have, better, pending}` (downloaded audio formats, better ones the album has, a waiting upgrade) |
 | `POST /api/album/read` `{slug}` | Read that album's page now -> `{read, files, renamed, slug}` |
 | `POST /api/album/check` `{slug}` | Look on disk for that album's downloaded files; missing ones are downloaded by the next sync -> `{slug, missing}` |
+| `POST /api/album/upgrade` `{slug, format}` | Upgrade a downloaded album to a better format it has (`flac`, ...); `format` `""` cancels a waiting upgrade -> `{slug, pending}` (400 for a format that isn't better, 404 for an unknown album) |
+| `POST /api/check` | Job: look on disk for every downloaded file; missing ones are marked not downloaded (409 when busy) |
 | `POST /api/select` `{key, include}` | Tick/untick: `a:<slug>` or `p:<platform>` |
 | `POST /api/selection/clear` | Untick everything |
 | `POST /api/scan` · `POST /api/read` `{albums?}` · `POST /api/sync` · `POST /api/stop` | Jobs (409 when busy); `read` without albums reads every ticked album's page |

@@ -8,6 +8,8 @@ A file on disk is a leftover when
   * "unticked" - the site still lists it, but its album isn't ticked any more, or its format (or the
                  album art) isn't synced;
   * "part"     - an unfinished download (.part) of a file that isn't wanted any more.
+The old format of an album waiting for its upgrade is not listed: the sync deletes it once the new
+one is in (Engine._finish_upgrades).
 Files Khinsider Sync didn't download and doesn't know are never listed - other music you keep in
 the same folder is safe. Nothing is deleted without an explicit list of paths, and only paths that
 are still leftovers when the delete runs are removed. Symlinks are never followed or deleted; the
@@ -92,9 +94,12 @@ def find(engine, settings: dict, disk: list) -> list:
         if a["read"]:
             by_dir.setdefault(engine.album_dir(a, settings), []).append(slug)
     want_cache: dict = {}
+    upgrading = {slug: set(u.get("from") or ()) for slug, u in (settings.get("album_upgrades") or {}).items()}
 
     def wanted(hit) -> bool:
         _url, album, ext, kind = hit
+        if kind != "art" and ext in upgrading.get(album, ()):
+            return True                                    # kept until its replacement is in
         if album not in selected:
             return False
         if album not in want_cache:
