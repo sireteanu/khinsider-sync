@@ -47,14 +47,17 @@ FailCallback = Callable[[str, str, str], None]
 
 class ResolveError(FetchError):
     """Finding a file's download address failed. `status`: the HTTP status of the page that holds
-    it (None for anything else); `permanent`: trying again won't help (the page has no link)."""
+    it (None for anything else); `permanent`: trying again won't help (the page has no link);
+    `pause`: no file can get through now (e.g. a Cloudflare browser check) - downloads pause with
+    this reason and everything stays queued, nothing is marked failed."""
 
     def __init__(self, message: str, status: Optional[int] = None, permanent: bool = False,
-                 retry_after: Optional[float] = None):
+                 retry_after: Optional[float] = None, pause: Optional[str] = None):
         super().__init__(message)
         self.status = status
         self.permanent = permanent
         self.retry_after = retry_after
+        self.pause = pause
 
 
 class Downloader:
@@ -403,6 +406,9 @@ class Downloader:
                 return DONE
             except ResolveError as e:
                 err = str(e)
+                if e.pause:
+                    self.pause(e.pause)
+                    return QUEUED
                 if e.permanent:
                     self._failed(url, rel, err)
                     return DONE

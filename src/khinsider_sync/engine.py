@@ -21,7 +21,7 @@ from .core.constants import RETRY_STATUSES
 from .core.download import Downloader, ResolveError, run_item
 from .core.limits import DownloadGate, RateLimit, _retry_after
 from .core.sync import MANIFEST_NAME, FileInfo, Manifest, size_range, stamp_folders
-from .core.util import fmt_bytes, parse_size, safe_segment
+from .core.util import CHALLENGE_MESSAGE, fmt_bytes, is_challenge, parse_size, safe_segment
 
 from . import __version__, parse
 from .catalog import (ALBUM, PLATFORM, Catalog, album_plan, album_rank, album_wants, parse_format_setting,
@@ -143,6 +143,9 @@ class Resolver:
                 return self.cache[page]
             self.requests += 1
             r = await self.client.get(page)
+            if is_challenge(r.status_code, r.headers):
+                raise ResolveError(f"track page: HTTP {r.status_code} (Cloudflare browser check)", status=r.status_code,
+                                   pause=CHALLENGE_MESSAGE.format(status=r.status_code))
             if r.status_code != 200:
                 status = r.status_code
                 raise ResolveError(f"track page: HTTP {status}", status=status,
@@ -449,7 +452,8 @@ class Engine:
         p = urlsplit(self.base)
         try:
             r = await client.get(f"{p.scheme}://{p.netloc}/robots.txt", timeout=10)
-            if r.status_code == 200 and "html" not in r.headers.get("content-type", ""):
+            # khinsider serves robots.txt as text/html: judge by the content, not the type
+            if r.status_code == 200 and not r.text.lstrip().startswith("<"):
                 rp = RobotFileParser()
                 rp.parse(r.text.splitlines())
                 return rp
@@ -498,6 +502,8 @@ class Engine:
                     if kind in ("sync", "scan+sync", "quick+sync") and not self.stop_requested:
                         summary["sync"] = await self._sync(client, robots, albums if kind == "sync" else None)
             self.job["phase"] = "stopped" if self.stop_requested else "done"
+            if self.scanner is not None and self.scanner.challenged:
+                self.job["message"] = "khinsider asks for a browser check (Cloudflare) - see the log"
         except Exception as e:
             log.exception("job failed: %r", e)
             self.job["phase"] = "failed"
@@ -535,6 +541,9 @@ class Engine:
             res = await self._scanner(client, robots).read_albums(unread, "album pages")
             if self.stop_requested:
                 return {}
+            if self.scanner.challenged:          # track pages would get the same: no downloads now
+                self.job["message"] = "khinsider asks for a browser check (Cloudflare) - see the log"
+                return {"challenged": True}
             if res["renamed"]:
                 slugs = [res["renamed"].get(a, a) for a in slugs]
             albums = self.catalog.albums_by_slug(slugs)

@@ -234,6 +234,11 @@ doesn't change albums). For every file of the other ticked albums (formats as ab
   page or the file) count per file; after 3 the site's home page is asked. If it doesn't answer,
   downloads wait for it (one checks, the others wait), checking at 30 s, then doubling to every 10 min,
   and pause after `outage_wait_hours`. Nothing is marked failed because the site is down.
+- **Cloudflare browser check**: when khinsider answers with Cloudflare's "Just a moment..." check (403
+  with `cf-mitigated: challenge`) - as it does for data-center addresses, while a home connection gets
+  through - a scan stops at once (it is "incomplete", so it removes nothing) and a sync pauses; nothing is
+  marked failed and the log says so in one line. Downloads themselves come from the vgmtreasurechest.com
+  file servers, which didn't ask for the check in October 2026.
 - **Download limit**: when the site keeps answering with an HTML page instead of files while nothing
   else gets through, downloads pause ("Paused: …") and stay queued for the next sync.
 - **Free space**: downloads pause before the disk would drop below "Keep free on disk".
@@ -424,4 +429,8 @@ Verified in a browser (October 2026). If the site changes, these are the first t
 - Track pages: `/game-soundtracks/album/<slug>/<file name encoded twice>.mp3`, links
   `.songDownloadLink` per format to `https://<server>.vgmtreasurechest.com/soundtracks/<slug>/<token>/<file>`.
 - Track sizes in MB with two decimals; totals with thousands commas.
-- `robots.txt` only disallows `/unavailable`.
+- `robots.txt` only disallows `/unavailable`; it is sent as `text/html`, so it is read by its content.
+- Cloudflare protects the pages: from a data-center address (a cloud server) every page answers with the
+  "Just a moment..." browser check (403, `cf-mitigated: challenge`) whatever the client looks like,
+  while the file servers still send files (checked October 24th, 2026). From a home connection the
+  pages load.

@@ -63,6 +63,11 @@ tests/  conftest (app_factory + API helpers), mock_site, fixtures/ (real markup 
   (host and a per-album token vary), so **the download address is only known from the track page**:
   `engine.Resolver` reads it right before the download (one request per track, cached for its other
   formats). File names are the page's name decoded twice with the format's extension.
+- Cloudflare guards the pages: data-center addresses (this cloud workspace) get the "Just a moment..."
+  browser check (403, `cf-mitigated: challenge`) for every page whatever the fingerprint; the file
+  servers still answer. `util.is_challenge` -> `ChallengeError` stops scans, `ResolveError(pause=...)`
+  pauses syncs; nothing is marked failed. Never try to solve or get around the check.
+  robots.txt comes as text/html.
 - Sizes are shown in MB with two decimals ("5.64 MB"); totals use thousands commas ("1,438 MB").
   No per-file dates: files get the album's Date Added (12:00 local time).
 

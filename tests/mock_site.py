@@ -34,6 +34,9 @@ Attributes you can change while a test runs:
   daily_limit after this many completed downloads every file answers with an HTML page
   down        an HTTP status (e.g. 522): the whole site answers with it (None = up)
   down_after  set `down` to 522 once this many downloads have completed (None = never)
+  challenge   True: every page (not the files) answers Cloudflare's browser check - 403 with
+              cf-mitigated: challenge and "Just a moment..." (what a data-center address gets)
+  robots_extra  more robots.txt lines (robots.txt is sent as text/html, like the live site)
 Methods: modify(slug, file, grow) replaces a file; remove(slug) takes an album off the site;
 add_album(slug, name, **fields) puts a new album up (added today unless `added` is given);
 rename(old, new) moves an album to a new address (the old one redirects).
@@ -152,6 +155,8 @@ class MockSite:
         self.completed = 0
         self.rejected = 0
         self.slow_all = False
+        self.challenge = False             # pages answer Cloudflare's browser check (403, cf-mitigated)
+        self.robots_extra = ""             # more robots.txt lines
         self.requests: list = []           # (path, headers dict)
         self._lock = threading.Lock()
         self._count = 0
@@ -190,8 +195,13 @@ class MockSite:
                 if site.down:
                     return self._send(site.down, "<html><head><title>Connection timed out</title></head>"
                                                  "<body>The web server is not responding.</body></html>")
-                if path == "/robots.txt":
-                    return self._send(200, "\nUser-agent: *\r\nDisallow: /unavailable", "text/plain")
+                if path == "/robots.txt":                     # the live site sends it as text/html
+                    return self._send(200, "\nUser-agent: *\r\nDisallow: /unavailable" + site.robots_extra,
+                                      "text/html; charset=UTF-8")
+                if site.challenge and not path.startswith("/soundtracks/"):
+                    return self._send(403, '<!DOCTYPE html><html lang="en-US"><head><title>Just a moment...</title>'
+                                      '</head><body>Enable JavaScript and cookies to continue</body></html>',
+                                      extra=[("cf-mitigated", "challenge"), ("Server", "cloudflare")])
                 if path.startswith("/soundtracks/"):
                     return self._file(path)
                 if "throttle" in site.modes and n % 4 == 0:

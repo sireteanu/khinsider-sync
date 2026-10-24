@@ -62,3 +62,52 @@ def test_waiting_can_be_stopped(site, app_factory):
     threading.Timer(0.5, lambda: c.post("/api/stop")).start()
     st = wait(c, 20)
     assert st["job"]["phase"] == "stopped" and st["sync"]["failed"] == 0
+
+
+def test_a_cloudflare_browser_check_stops_a_scan_at_once(site, app_factory):
+    c = app_factory(site)
+    scan(c)
+    site.challenge = True
+    site.reset_log()
+    st = scan(c)
+    pages = [p for p, _ in site.requests if not p.startswith("/robots")]
+    assert len(pages) <= 5, "stops instead of asking for all the other pages"
+    msgs = log_lines(st)
+    assert sum("asks this network for a browser check" in m for m in msgs) == 1
+    assert "browser check" in st["job"]["message"]
+    site.challenge = False
+    r = c.get("/api/albums").json()
+    assert r["total"] == 7, "an incomplete scan removes nothing"
+
+
+def test_a_browser_check_pauses_a_sync_without_failing_files(site, app_factory):
+    c = app_factory(site)
+    scan(c)
+    select(c, "p:windows")
+    c.post("/api/read", json={})
+    wait(c)
+    site.challenge = True                        # track pages answer the check, files would not
+    st = sync(c)
+    assert st["sync"]["failed"] == 0 and not on_disk(c.data)
+    assert "browser check" in (st["sync"]["paused"] or "")
+    site.challenge = False
+    st = sync(c)
+    assert st["sync"]["new"] == ALL_WINDOWS and st["sync"]["failed"] == 0
+
+
+def test_unread_albums_are_not_marked_failed_by_a_browser_check(site, app_factory):
+    c = app_factory(site)
+    scan(c)
+    select(c, "a:persona-5")
+    site.challenge = True
+    st = sync(c)
+    assert "browser check" in st["job"]["message"]
+    a = c.get("/api/album", params={"slug": "persona-5"}).json()["album"]
+    assert not a["error"], "the album itself is fine"
+
+
+def test_robots_txt_sent_as_html_is_still_respected(site, app_factory):
+    site.robots_extra = "\r\nDisallow: /game-soundtracks/browse/B"
+    c = app_factory(site)
+    scan(c)
+    assert not [p for p, _ in site.requests if p.startswith("/game-soundtracks/browse/B")]

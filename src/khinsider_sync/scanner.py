@@ -17,7 +17,7 @@ import httpx
 
 from .core.constants import MAX_BODY, RETRY_STATUSES, THROTTLE_STATUSES
 from .core.limits import Limiter, _retry_after
-from .core.util import FetchError
+from .core.util import CHALLENGE_MESSAGE, ChallengeError, FetchError, is_challenge
 
 from . import parse
 from .catalog import Catalog
@@ -75,6 +75,8 @@ class Scanner:
     def stop(self):
         self.stopping = True
 
+    challenged = False                         # a Cloudflare browser check stopped this scanner
+
     async def _fetch(self, url: str):
         """-> (final url, body). Pages only: anything that isn't HTML comes back with body None."""
         if self.robots is not None and not self.robots.can_fetch(self.user_agent, url):
@@ -99,6 +101,12 @@ class Scanner:
                             body = bytes(buf)
                         self.lim.ok(time.monotonic() - t0)
                         return str(r.url), body
+                    if is_challenge(status, r.headers):
+                        if not self.challenged:
+                            self.challenged = True
+                            log.error(CHALLENGE_MESSAGE.format(status=status))
+                        self.stopping = True             # every other page would get the same
+                        raise ChallengeError(f"HTTP {status} (Cloudflare browser check)")
                     if status not in RETRY_STATUSES:
                         raise FetchError(f"HTTP {status}")
                     err = f"HTTP {status}"
@@ -175,7 +183,8 @@ class Scanner:
                 _, body = await self._fetch(url)
             except FetchError as e:
                 self.errors += 1
-                log.warning("could not read %s (%s)", self.current, e)
+                if not isinstance(e, ChallengeError):
+                    log.warning("could not read %s (%s)", self.current, e)
                 return
             albums, pages, found = parse.parse_browse(body or b"")
             self.pages += 1
@@ -193,7 +202,7 @@ class Scanner:
         for letter in parse.LETTERS:
             self.queue.put_nowait((letter, 1))
         await self._pool(handle)
-        status = "stopped" if self.stopping else "done"
+        status = "incomplete" if self.challenged else "stopped" if self.stopping else "done"
         gone: list = []
         if status == "done" and not self.errors and self.albums:
             await self._follow_moved(scan_id)
@@ -228,7 +237,8 @@ class Scanner:
                 _, body = await self._fetch(self.base if page == 1 else f"{self.base}?page={page}")
             except FetchError as e:
                 self.errors += 1
-                log.warning("could not read the newest albums (page %d: %s)", page, e)
+                if not isinstance(e, ChallengeError):
+                    log.warning("could not read the newest albums (page %d: %s)", page, e)
                 break
             days, pages = parse.parse_latest(body or b"")
             self.pages += 1
@@ -246,7 +256,9 @@ class Scanner:
             if oldest < since or page >= pages:
                 status = "done"
                 break
-        if self.stopping:
+        if self.challenged:
+            status = "incomplete"
+        elif self.stopping:
             status = "stopped"
         named = self.catalog.assign_folders(name_of)
         self.catalog.finish_scan(scan_id, self.pages, self.albums, status)
@@ -285,6 +297,9 @@ class Scanner:
             self.current = slug
             try:
                 final, body = await self._fetch(album_url(self.base, slug))
+            except ChallengeError:
+                self.errors += 1                 # not the album's fault: it isn't marked failed
+                return
             except FetchError as e:
                 self.errors += 1
                 self.catalog.album_failed(slug, str(e))

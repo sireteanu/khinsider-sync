@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.0.6] - 2026-10-24
+
+### Fixed
+- A Cloudflare browser check ("Just a moment...") from khinsider no longer fails every file of a sync:
+  a scan stops at once and removes nothing, a sync pauses with everything still queued, and the log
+  says what happened in one line. Albums aren't marked as unreadable because of it.
+- khinsider's robots.txt is respected again (the site sends it as a web page, so it was skipped).
+
+### Checked on the real site
+- A real file downloads complete through the Chrome-like client (MP3 header and size as listed).
+
 ## [1.0.5] - 2026-10-24
 
 ### New

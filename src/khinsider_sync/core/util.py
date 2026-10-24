@@ -55,5 +55,21 @@ class FetchError(Exception):
     pass
 
 
+class ChallengeError(FetchError):
+    """The site's Cloudflare protection answered with its browser check ("Just a moment...")
+    instead of the page: every further page request from this network would get the same."""
+
+
+CHALLENGE_MESSAGE = ("khinsider's Cloudflare protection asks this network for a browser check "
+                     "(HTTP {status} \"Just a moment...\") - its pages can't be read from here right now. "
+                     "Nothing was marked as failed; try again later. If it keeps happening, check that "
+                     "\"Look like Chrome\" is on in Settings")
+
+
+def is_challenge(status: int, headers) -> bool:
+    """A Cloudflare browser check (managed challenge) instead of the page?"""
+    return status in (403, 429, 503) and (headers.get("cf-mitigated") or "").lower() == "challenge"
+
+
 class DiskFull(Exception):
     pass

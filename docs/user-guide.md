@@ -108,6 +108,9 @@ same folder is left alone.
 
 ## Tips
 
+- If the log says khinsider's Cloudflare protection **asks for a browser check**, its pages can't be
+  read from that network right now. Nothing is marked failed; try again later. Servers in a data
+  center (a rented cloud server) get this all the time; a home server normally doesn't.
 - If khinsider ever starts refusing Khinsider Sync, check that **Look like Chrome** is on in Settings
   (it is by default).
 - Be gentle with khinsider: keep parallel downloads at the default, and don't tick everything.
