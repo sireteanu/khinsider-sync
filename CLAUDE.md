@@ -33,7 +33,9 @@ src/khinsider_sync/
                 albums (quick scan, falls back to a full scan); read_albums() reads album pages
   parse.py      every page reader (browse list, latest list, album page, track page, platform list)
   extras.py     optional playlists (.m3u8) and folder.jpg per downloaded album, tracked in `extras`
-  covers.py     optional cover embedded into music files without one (mutagen); files.cover, Manifest.resized
+  covers.py     optional cover and missing tags put into music files (mutagen); files.cover / files.tags,
+                Manifest.resized; one pass at the end of a sync (`Engine._tag_files`, `_finished_albums`)
+  notify.py     notifications after jobs (ntfy / Gotify / Discord / JSON webhooks), never blocking a job
   cleanup.py    Clean up: walk the download folder, judge files (gone / part / unticked), delete
   static/       index.html, app.css, app.js - no build step, no CDN (works offline on a LAN)
   core/         the sync engine from Rom Sync
@@ -108,7 +110,10 @@ tests/  conftest (app_factory + API helpers), mock_site, fixtures/ (real markup 
 8. **Getting through**: with `impersonate` (default) the client uses `browser.ChromeTransport` and only
    adds `Referer`; otherwise `browser_headers()` (browser-like Accept headers + Referer). Every
    request names khinsider as Referer - its download servers expect it.
-9. **Downloaded albums are final**: khinsider doesn't change albums. A sync reads an album page
+9. **Downloaded albums are final** - unless khinsider replaces one with another version: it then
+   reappears in the newest-albums list with a later Date Added; every scan reads that list
+   (`Catalog.mark_replaced` sets `albums.changed`, page unread) and the next sync re-reads and re-plans
+   it (`clear_changed`). Otherwise a sync reads an album page
    only if it was never read, and skips albums whose wanted files are all downloaded
    (`album_totals()["downloaded"]`) - no request, no disk access. "Read album page" (by hand) and
    "Check files" (`Engine.check_album`, `Catalog.forget_missing`) and the "check" job (Check download
@@ -129,7 +134,7 @@ tests/  conftest (app_factory + API helpers), mock_site, fixtures/ (real markup 
   CHANGELOG.md.
 
 ## Conventions
-- Dependencies: httpx[http2], selectolax, fastapi, uvicorn, curl_cffi, mutagen (+ pytest/pyflakes). Ask before adding more.
+- Dependencies: httpx[http2], selectolax, fastapi, uvicorn, curl_cffi, mutagen, Pillow (+ pytest/pyflakes). Ask before adding more.
   The app must keep working without curl_cffi (plain httpx, a warning in the log).
 - Log through `logging.getLogger("khinsider_sync")`. Never `print`.
 - Every user-visible change gets a test against `MockSite`. **MockSite copies the live markup**; when

@@ -148,7 +148,7 @@
         <div id="eta-sub" class="muted small"></div>
       </div>
       <div id="check-box" class="eta" hidden>
-        <div class="eta-head"><span class="muted small">Checking the download folder</span><span id="check-count" class="small"></span></div>
+        <div class="eta-head"><span id="check-title" class="muted small">Checking the download folder</span><span id="check-count" class="small"></span></div>
         <div class="eta-main"><span class="muted small">Time remaining</span><b id="check-time">-</b></div>
         <div class="bar thin" role="progressbar" aria-label="Files checked" aria-valuemin="0" aria-valuemax="100" id="check-meter"><div class="seg synced" id="check-bar"></div></div>
         <div id="check-sub" class="muted small"></div>
@@ -249,6 +249,7 @@
     <label class="check"><input type="checkbox" name="playlists"> <span>Write a playlist (<i>Album.m3u8</i>) into each downloaded album's folder</span></label>
     <label class="check"><input type="checkbox" name="folder_art"> <span>Save each downloaded album's cover as <i>folder.jpg</i> - the picture khinsider shows for it, also when you don't sync images (Plex, Jellyfin and Kodi show it)</span></label>
     <label class="check"><input type="checkbox" name="embed_cover"> <span>Put the cover into each downloaded music file that has none (MP3, FLAC, M4A, OGG) - pictures already inside are kept</span></label>
+    <label class="check"><input type="checkbox" name="write_tags"> <span>Fill in missing tags from the album page - title, album, track and disc number, year (khinsider's files often have none; tags already there are kept)</span></label>
     <fieldset class="field types-box"><legend>A ticked platform brings in these album types</legend>
       <div id="types-list" class="types-list"></div>
       <small>None ticked = every type. Albums you tick one by one are always synced.</small></fieldset>
@@ -282,6 +283,15 @@
         <option value="30">Once a month</option>
       </select>
       <small>Looks at every downloaded file, which wakes the disks it is on (on Unraid, the array). <b>Check download folder</b> in the menu does it whenever you like.</small></label>
+    <fieldset class="field notify-box"><legend>Notifications</legend>
+      <span class="unit"><input name="notify_url" type="url" spellcheck="false" autocomplete="off" placeholder="https://ntfy.sh/your-topic"><button id="notify-test" class="btn small" type="button">Send a test</button></span>
+      <small>An ntfy topic, a Gotify <i>/message?token=…</i> address, a Discord webhook or a Home Assistant webhook. Empty = no notifications.
+        (Unraid's own notifications can't be reached from inside the container.) <span id="notify-result"></span></small>
+      <div class="types-list">
+        <label class="check"><input type="checkbox" name="notify_downloads"> Downloads finished (which albums)</label>
+        <label class="check"><input type="checkbox" name="notify_new_albums"> New albums for your ticked platforms</label>
+        <label class="check"><input type="checkbox" name="notify_problems"> Problems (sync paused, job failed)</label>
+      </div></fieldset>
     <label class="check"><input type="checkbox" name="resume_interrupted"> Continue an unfinished sync when the app starts again (after a restart, crash or reboot)</label>
     <label class="check"><input type="checkbox" name="impersonate"> Look like Chrome to khinsider (its Cloudflare protection can turn other programs away)</label>
     <p id="settings-error" class="error" hidden></p>
@@ -307,7 +317,10 @@
   <p class="muted small">Files in the download folder that aren't part of the sync any more. Tick what should go;
     nothing is deleted until you confirm. Only files Khinsider Sync downloaded or knows are listed - other music in the
     folder is never touched.</p>
-  <p id="clean-loading" class="muted">Checking the download folder…</p>
+  <div id="clean-loading">
+    <p id="clean-loading-text" class="muted">Looking through the download folder…</p>
+    <div class="bar thin" role="progressbar" aria-label="Files looked at" aria-valuemin="0" aria-valuemax="100" id="clean-meter"><div class="seg synced" id="clean-bar" style="width:0"></div></div>
+  </div>
   <p id="clean-empty" class="muted" hidden>Nothing to clean up: everything in the download folder is part of the sync.</p>
   <div id="clean-body" class="clean-body"></div>
   <p id="clean-result" class="small" hidden></p>

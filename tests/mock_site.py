@@ -52,6 +52,19 @@ import urllib.parse as up
 from email.utils import formatdate
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+def _tiny_png() -> bytes:
+    """A real 4x4 PNG, half see-through (image readers can open it; trailing bytes are ignored)."""
+    import struct
+    import zlib
+
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+    rows = b"".join(b"\x00" + b"\xff\x00\x00\xff\xff\x00\x00\xff\x00\x00\x00\x00\x00\x00\x00\x00" for _ in range(4))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 4, 4, 8, 6, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
+
+
+TINY_PNG = _tiny_png()
 PAGE_SIZE = 2
 LATEST_PAGE_SIZE = 3
 LETTERS = ["0-9"] + [chr(c) for c in range(ord("A"), ord("Z") + 1)]
@@ -348,7 +361,7 @@ class MockSite:
         streaminfo = (b"\x10\x00\x10\x00" + b"\x00" * 6
                       + ((44100 << 44) | (1 << 41) | (15 << 36)).to_bytes(8, "big") + b"\x00" * 16)
         head = {"mp3": b"ID3\x04\x00\x00\x00\x00\x00\x00", "flac": b"fLaC\x80\x00\x00\x22" + streaminfo,
-                "ogg": b"OggS", "jpg": b"\xff\xd8\xff\xe0", "png": b"\x89PNG"}.get(ext, b"")
+                "ogg": b"OggS", "jpg": b"\xff\xd8\xff\xe0", "png": TINY_PNG}.get(ext, b"")
         seed = hashlib.sha256(f"{slug}/{name}#{version}".encode()).digest()
         return head + (seed * (size // 32 + 1))[: size - len(head)]
 

@@ -408,3 +408,8 @@ table.files tr.unwanted td { opacity: .45; }
 .badge.done { color: var(--teal); border-color: var(--teal); }
 .badge.part { color: var(--amber); border-color: var(--amber); }
 .arow.done .aname .n { color: var(--ink-2); }
+
+.notify-box .unit { display: flex; gap: 8px; align-items: center; }
+.notify-box .unit input { flex: 1; min-width: 0; }
+.notify-box #notify-result.ok { color: var(--teal); }
+.notify-box #notify-result.error { color: var(--red); }

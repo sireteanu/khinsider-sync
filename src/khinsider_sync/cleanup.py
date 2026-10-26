@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 import os
 import sqlite3
+from typing import Optional
 
 from .core.sync import MANIFEST_NAME, Manifest
 from .core.util import fmt_bytes, fs_path
@@ -35,9 +36,13 @@ REASONS = {
 IGNORED = {"thumbs.db", "desktop.ini", ".ds_store"}
 
 
-def walk(root: str) -> list:
-    """[(rel dir, name, size)] for every regular file under root (runs in a thread)."""
+def walk(root: str, progress: Optional[dict] = None) -> list:
+    """[(rel dir, name, size)] for every regular file under root (runs in a thread). `progress`
+    gets "files" and "folders" counted up while it runs (for the page's progress bar)."""
     out = []
+    progress = progress if progress is not None else {}
+    progress.setdefault("files", 0)
+    progress.setdefault("folders", 0)
     root = fs_path(root)
     if not os.path.isdir(root):
         return out
@@ -55,9 +60,11 @@ def walk(root: str) -> list:
                 if e.is_symlink():
                     continue
                 if e.is_dir():
+                    progress["folders"] += 1
                     scan(e.path, f"{rel}/{e.name}" if rel else e.name)
                 elif e.is_file():
                     out.append((rel, e.name, e.stat().st_size))
+                    progress["files"] += 1
             except OSError:
                 continue
 

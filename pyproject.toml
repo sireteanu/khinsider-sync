@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "khinsider-sync"
-version = "1.0.10"
+version = "1.0.11"
 description = "Browse every khinsider.com soundtrack in a web interface and keep the albums you pick in sync"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -15,6 +15,7 @@ dependencies = [
     "uvicorn>=0.29",
     "curl_cffi>=0.7",
     "mutagen>=1.45",
+    "Pillow>=10",
 ]
 
 [project.optional-dependencies]

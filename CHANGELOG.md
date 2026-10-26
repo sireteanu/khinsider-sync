@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.0.11] - 2026-10-25
+
+### New
+- **Albums khinsider replaces with another version** are noticed: they reappear among the newest
+  albums, every scan reads that list, the album is marked **New version**, and the next sync
+  downloads it again. Before, a downloaded album was never looked at again.
+- **Fill in missing tags** (Settings): title, album, track and disc number, year - from the album
+  page, into files that lack them (khinsider's files often have none). Tags already there are kept.
+- **Notifications** (Settings): ntfy, Gotify, Discord or Home Assistant webhooks - downloads finished,
+  new albums for your ticked platforms, problems. With a **Send a test** button.
+- Clean up shows how far it has looked through the download folder, in its window and the Activity panel.
+
+### Improved
+- PNG covers become a real folder.jpg (converted with Pillow, see-through parts on black). Existing
+  folder.png files are swapped for folder.jpg at the next sync.
+- The steps at the end of a sync (old formats, playlists and covers, tags) work out the finished
+  albums once instead of each on its own.
+
 ## [1.0.10] - 2026-10-25
 
 ### Improved

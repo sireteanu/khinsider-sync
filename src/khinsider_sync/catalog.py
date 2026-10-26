@@ -33,7 +33,10 @@ DEFAULT_SETTINGS = {
     "art_folder": False,            # images in an "Art" folder inside the album's folder
     "playlists": False,             # write "<album>.m3u8" next to a downloaded album's music (extras.py)
     "folder_art": False,
-    "embed_cover": False,           # put the album's cover into its music files that have none (covers.py)            # copy a downloaded album's cover to folder.jpg / folder.png (extras.py)
+    "embed_cover": False,           # put the album's cover into its music files that have none (covers.py)
+    "write_tags": False,            # fill in missing title / album / track / disc / year tags (covers.py)            # copy a downloaded album's cover to folder.jpg / folder.png (extras.py)
+    "notify_url": "",               # ntfy / Gotify / Discord / Home Assistant webhook ... (notify.py); "" = off
+    "notify_on": ["downloads", "new_albums", "problems"],
     "replace_formats": False,       # once a ticked album is downloaded in the formats now wanted, delete its
                                     # music files of formats no longer wanted (Engine._finish_upgrades)
     "impersonate": True,            # requests look like Chrome (needs curl_cffi)
@@ -225,6 +228,11 @@ class Catalog:
         cols = {r[1] for r in self.db.execute("PRAGMA table_info(files)")}
         if "cover" not in cols:                  # 1.0.9: covers embedded into music files (covers.py)
             self.db.execute("ALTER TABLE files ADD COLUMN cover TEXT")
+        if "tags" not in cols:                   # 1.0.11: missing tags filled in (covers.py)
+            self.db.execute("ALTER TABLE files ADD COLUMN tags TEXT")
+        if "changed" not in {r[1] for r in self.db.execute("PRAGMA table_info(albums)")}:
+            # 1.0.11: when khinsider replaced the album with another version (seen in its newest list)
+            self.db.execute("ALTER TABLE albums ADD COLUMN changed TEXT")
         self.db.commit()
         self._index: Optional[list] = None       # [(slug, (platforms), type)] for the selection
         self._stats: Optional[dict] = None       # {album: {ext|"art": [n, bytes, synced, synced_bytes, failed]}}
@@ -286,6 +294,27 @@ class Catalog:
         with self.lock:
             row = self.db.execute("SELECT MAX(started) FROM scans WHERE kind IN ('full','quick') AND status='done'").fetchone()
         return row[0] if row and row[0] else None
+
+    def mark_replaced(self, seen: Iterable[tuple]) -> list:
+        """(slug, day) pairs from khinsider's newest-albums list. An album whose page was read
+        before and now shows up there with a later day was replaced by another version: its page is
+        read again and its files are checked by the next sync that includes it. -> those slugs."""
+        out = []
+        with self.lock:
+            for slug, day in seen:
+                row = self.db.execute("SELECT read, added FROM albums WHERE slug=?", (slug,)).fetchone()
+                if row and row[0] and row[1] and row[1] < day:
+                    self.db.execute("UPDATE albums SET read=NULL, changed=? WHERE slug=?", (day, slug))
+                    out.append(slug)
+            if out:
+                self.db.commit()
+        if out:
+            self.changed(albums=True)
+        return out
+
+    def clear_changed(self, slugs: Iterable[str]) -> None:
+        with self.lock:
+            self.db.executemany("UPDATE albums SET changed=NULL WHERE slug=?", [(s,) for s in slugs])
 
     def set_platforms(self, rows: Iterable[tuple]) -> None:
         """[(slug, name, albums)] from the site's platform list."""
@@ -358,7 +387,7 @@ class Catalog:
 
     # ------------------------------------------------------------------ albums
     COLS = ("slug", "name", "platforms", "type", "year", "folder", "read", "error", "missing", "added",
-            "title", "formats", "tracks", "images", "first_seen")
+            "title", "formats", "tracks", "images", "first_seen", "changed")
 
     def album(self, slug: str) -> Optional[dict]:
         with self.lock:
@@ -555,23 +584,37 @@ class Catalog:
         with self.lock:
             self.db.execute("INSERT OR REPLACE INTO extras VALUES (?,?,?,?)", (rel, album, kind, sig))
 
-    def uncovered(self, slugs) -> list:
-        """[(url, rel, album, ext)] downloaded music files of these albums not handled by covers.py yet."""
+    def untagged(self, slugs, cover: bool, tags: bool) -> list:
+        """Downloaded music files of these albums covers.py hasn't handled yet (for the cover and/or
+        the tags) -> [dict(url, rel, album, ext, disc, num, pos, title, name, cover, tags)]."""
         words = ",".join("'%s'" % w for w in SYNCED_WORDS)
+        todo = " OR ".join(c for c, on in (("cover IS NULL", cover), ("tags IS NULL", tags)) if on)
+        if not todo:
+            return []
+        keys = ("url", "rel", "album", "ext", "disc", "num", "pos", "title", "name", "cover", "tags")
         out = []
         slugs = list(slugs)
         with self.lock:
             for i in range(0, len(slugs), 500):
                 chunk = slugs[i:i + 500]
-                out += self.db.execute(
-                    f"SELECT url, rel, album, ext FROM files WHERE kind!='art' AND cover IS NULL AND local IN ({words}) "
-                    f"AND album IN ({','.join('?' * len(chunk))}) ORDER BY album, pos", chunk).fetchall()
+                out += [dict(zip(keys, r)) for r in self.db.execute(
+                    f"SELECT {', '.join(keys)} FROM files WHERE kind!='art' AND ({todo}) AND local IN ({words}) "
+                    f"AND album IN ({','.join('?' * len(chunk))}) ORDER BY album, pos", chunk)]
         return out
 
-    def set_cover(self, url: str, result: str, size: Optional[int] = None) -> None:
+    def track_layout(self, album: str) -> dict:
+        """{(ext, disc): [num or pos, ...] in track order} of an album's music files - for track totals."""
+        out: dict = {}
         with self.lock:
-            self.db.execute("UPDATE files SET cover=?, local_size=COALESCE(?, local_size) WHERE url=?",
-                            (result, size, url))
+            for ext, disc, num, pos in self.db.execute(
+                    "SELECT ext, disc, num, pos FROM files WHERE album=? AND kind!='art' ORDER BY pos", (album,)):
+                out.setdefault((ext, disc or ""), []).append((num, pos))
+        return out
+
+    def set_tagged(self, url: str, cover: Optional[str], tags: Optional[str], size: Optional[int] = None) -> None:
+        with self.lock:
+            self.db.execute("UPDATE files SET cover=COALESCE(?, cover), tags=COALESCE(?, tags), "
+                            "local_size=COALESCE(?, local_size) WHERE url=?", (cover, tags, size, url))
 
     def drop_extras(self, rels: Iterable[str]) -> None:
         with self.lock:
@@ -593,8 +636,9 @@ class Catalog:
     def set_local(self, url: str, word: Optional[str], size: Optional[int], error: Optional[str]) -> None:
         with self.lock:
             self.db.execute("UPDATE files SET local=?, local_size=COALESCE(?, local_size), synced=?, error=?, "
-                            "cover=CASE WHEN ? IN ('new','updated','resumed') THEN NULL ELSE cover END "
-                            "WHERE url=?", (word, size, time.time(), error, word, url))
+                            "cover=CASE WHEN ? IN ('new','updated','resumed') THEN NULL ELSE cover END, "
+                            "tags=CASE WHEN ? IN ('new','updated','resumed') THEN NULL ELSE tags END "
+                            "WHERE url=?", (word, size, time.time(), error, word, word, url))
         self._stats = None
         self.version += 1
 

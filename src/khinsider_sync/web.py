@@ -43,7 +43,8 @@ def album_json(e: Engine, a: dict, rules: dict, selected: set, settings: dict, n
             "platforms": [names.get(p, p) for p in a["platforms"]], "platform_slugs": a["platforms"],
             "state": "on" if a["slug"] in selected else "off", "own": own,
             "via": own is None and a["slug"] in selected,
-            "own_formats": (settings.get("album_formats") or {}).get(a["slug"], ""), **t}
+            "own_formats": (settings.get("album_formats") or {}).get(a["slug"], ""),
+            "changed": a.get("changed") or None, **t}
 
 
 def create_app(engine_factory, password: Optional[str] = None, on_restart=None, on_shutdown=None) -> FastAPI:
@@ -299,6 +300,16 @@ def create_app(engine_factory, password: Optional[str] = None, on_restart=None, 
             raise HTTPException(404, str(exc.args[0]))
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
+
+    @app.post("/api/notify/test")
+    async def notify_test(url: str = Body(..., embed=True)):
+        """Send a test notification to this address (not saved)."""
+        from . import notify
+        try:
+            await notify.send(url, "Khinsider Sync", "Test notification - notifications work.")
+        except Exception as exc:
+            return JSONResponse({"error": str(exc) or type(exc).__name__}, status_code=400)
+        return {"ok": True}
 
     @app.post("/api/check")
     async def check_folder():

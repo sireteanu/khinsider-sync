@@ -202,6 +202,8 @@ class Engine:
         self.shutting_down = False
         self.leftovers: Optional[dict] = None   # Clean up summary from the last check
         self.check_progress: Optional[dict] = None    # Check download folder: {total, done, missing}
+        self.cleanup_progress: Optional[dict] = None  # Clean up's look through the folder: {files, expected}
+        self._notifying: set = set()                  # notifications being sent
         self._sel_cache = None
 
     # ------------------------------------------------------------------ where albums are saved
@@ -357,8 +359,15 @@ class Engine:
                 v = max(0.0, float(v or 0))
                 v = int(v) if v == int(v) else v
             if k in ("resume_interrupted", "album_art", "art_folder", "impersonate", "replace_formats",
-                     "playlists", "folder_art", "embed_cover"):
+                     "playlists", "folder_art", "embed_cover", "write_tags"):
                 v = bool(v)
+            if k == "notify_url":
+                v = str(v or "").strip()
+                if v and not v.lower().startswith(("http://", "https://")):
+                    raise ValueError("the notification address must start with http:// or https://")
+            if k == "notify_on":
+                from .notify import EVENTS
+                v = [e for e in EVENTS if e in (v or [])]
             if k == "track_names" and v not in ("site", "numbered"):
                 raise ValueError("track names must be site or numbered")
             if k == "file_mode":
@@ -483,6 +492,14 @@ class Engine:
                 async with self._client() as client:
                     robots = await self._robots(client)
                     full = kind in ("scan", "scan+sync")
+                    since = self.catalog.last_good_scan()
+                    if full and since is not None:
+                        # the newest-albums list also shows albums khinsider replaced with another
+                        # version; the browse pages don't - one page more catches them
+                        day = time.strftime("%Y-%m-%d", time.localtime(since - 2 * 86400))
+                        summary["latest"] = await self._scanner(client, robots).scan_latest(self.folder_name, day)
+                        if self.scanner.challenged:
+                            full = False                 # the browse pages would get the same check
                     if kind in ("quick", "quick+sync"):
                         since = self.catalog.last_good_scan()
                         if since is None:
@@ -521,6 +538,51 @@ class Engine:
             self.catalog.changed(albums=True)       # final numbers show right away
             self._sel_cache = None
             self._schedule_next()
+            if not self.shutting_down:              # sent on the side: never holds up the next job
+                task = asyncio.create_task(self._notify(kind, started, summary))
+                self._notifying.add(task)
+                task.add_done_callback(self._notifying.discard)
+
+    async def _notify(self, kind: str, started: float, summary: dict) -> None:
+        """Tell the notification address what happened (notify.py)."""
+        from . import notify
+        s = self.catalog.settings()
+        if not (s.get("notify_url") or "").strip():
+            return
+        try:
+            sy = summary.get("sync") or {}
+            got = sy.get("got_albums") or []
+            if got or sy.get("failed"):
+                n = sum(sy.get(k, 0) for k in ("new", "updated", "resumed"))
+                parts = []
+                if got:
+                    parts.append(f"{fmt_bytes(sy.get('bytes', 0))} for {notify.album_list(got)}.")
+                if sy.get("failed"):
+                    parts.append(f"{sy['failed']} files failed - see the Activity log.")
+                await notify.send_quietly(s, "downloads", f"Khinsider Sync: {n} new files" if n else
+                                          f"Khinsider Sync: {sy['failed']} files failed", " ".join(parts))
+            if kind in ("scan", "quick", "scan+sync", "quick+sync") and "error" not in summary:
+                with self.catalog.lock:
+                    fresh = dict(self.catalog.db.execute("SELECT slug, name FROM albums WHERE first_seen>=?",
+                                                         (started,)).fetchall())
+                if fresh and len(fresh) < 5000:      # not the very first scan of the whole site
+                    mine = [fresh[a] for a in self.catalog.selected_albums() if a in fresh]
+                    if mine:
+                        await notify.send_quietly(
+                            s, "new_albums", f"Khinsider Sync: {len(mine)} new albums for you",
+                            f"New on khinsider for your ticked platforms: {notify.album_list(mine)}."
+                            + ("" if kind.endswith("+sync") else " The next sync downloads them."))
+            problem = None
+            if sy.get("paused"):
+                problem = f"The sync paused: {sy['paused']}"
+            elif summary.get("error"):
+                problem = f"The {kind} failed: {self.job.get('message') or summary['error']}"
+            elif "browser check" in (self.job.get("message") or ""):
+                problem = "khinsider's Cloudflare protection asked for a browser check - nothing could be read."
+            if problem:
+                await notify.send_quietly(s, "problems", "Khinsider Sync needs a look", problem)
+        except Exception as e:
+            log.warning("Could not send notifications: %r", e)
 
     async def _sync(self, client, robots, only: Optional[list] = None) -> dict:
         s = self.catalog.settings()
@@ -551,7 +613,8 @@ class Engine:
         self.scanner = None
         self.job["phase"] = "checking what needs downloading"
         # albums already downloaded are done for good: no requests and no disk checks for them
-        done = {a for a, d in albums.items() if d["read"] and self.catalog.album_totals(a, d["formats"], s)["downloaded"]}
+        done = {a for a, d in albums.items()
+                if d["read"] and not d["changed"] and self.catalog.album_totals(a, d["formats"], s)["downloaded"]}
         if done:
             log.info("%d ticked albums are already downloaded - skipped", len(done))
         albums = {a: d for a, d in albums.items() if a not in done}
@@ -596,12 +659,16 @@ class Engine:
 
         job_id = self.job["started"]
 
+        album_of = {r[0]: r[2] for r in rows}
+        got: set = set()                             # albums that got files (for notifications)
+
         def on_done(url, rel, word, size):
             st[word] = st.get(word, 0) + 1
             settle(url)
             self.catalog.set_local(url, word, size, None)
             if word in ("new", "updated", "resumed"):
                 self.catalog.add_change(job_id, word, rel, size)
+                got.add(album_of.get(url))
 
         def on_failed(url, rel, err):
             st["failed"] += 1
@@ -653,6 +720,9 @@ class Engine:
 
         for item in await asyncio.to_thread(plan_all):
             queue.put_nowait(item)
+        replaced = [a for a, d in albums.items() if d["changed"] and d["read"]]
+        if replaced and not self.stop_requested:
+            self.catalog.clear_changed(replaced)    # their files were compared with the new page
         manifest.commit()
         self.catalog.commit()
         if moved[0]:
@@ -712,8 +782,9 @@ class Engine:
                 manifest.commit()
                 self.catalog.commit()
                 await self._finish_upgrades()
-                await self._write_extras(client)
-                await self._embed_covers(client, manifest)
+                finished = self._finished_albums()      # worked out once for the steps below
+                await self._write_extras(client, finished)
+                await self._tag_files(client, manifest, finished)
                 await self._check_leftovers()
             best = self.gate.remembered_max()
             if best:
@@ -727,6 +798,8 @@ class Engine:
         summary["paused"] = dl.paused
         summary["server_max"] = best
         summary["track_pages"] = resolver.requests
+        names = self.catalog.albums_by_slug({a for a in got if a})
+        summary["got_albums"] = sorted(names[a]["name"] for a in names)
         log.info("Sync %s: %d new, %d updated, %d resumed, %d failed, %s downloaded%s",
                  "stopped" if self.stop_requested else ("paused" if dl.paused else "finished"),
                  st["new"], st["updated"], st["resumed"], st["failed"], fmt_bytes(dl.bytes),
@@ -937,19 +1010,28 @@ class Engine:
         self.catalog.commit()
         self._sel_cache = None
 
-    async def _write_extras(self, client=None) -> None:
+    def _finished_albums(self) -> tuple:
+        """(settings, ticked albums, ticked albums whose wanted files are all downloaded) - for the
+        steps at the end of a sync, worked out once instead of by each of them."""
+        s = self.catalog.settings()
+        if not (s.get("playlists") or s.get("folder_art") or s.get("embed_cover") or s.get("write_tags")
+                or self.catalog.extras()):
+            return s, set(), []
+        selected = set(self.catalog.selected_albums(None, s.get("platform_types") or []))
+        albums = self.catalog.albums_by_slug(selected)
+        done = [a for a, d in albums.items()
+                if d["read"] and self.catalog.album_totals(a, d["formats"], s)["downloaded"]]
+        return s, selected, done
+
+    async def _write_extras(self, client=None, finished=None) -> None:
         """Playlists and folder images of the ticked, downloaded albums (extras.py). Never fails a sync."""
         from . import extras
         from .cleanup import remove_empty_dirs
         try:
-            s = self.catalog.settings()
+            s, selected, done = finished or self._finished_albums()
             have = self.catalog.extras()
             if not (s.get("playlists") or s.get("folder_art") or have):
                 return
-            selected = set(self.catalog.selected_albums(None, s.get("platform_types") or []))
-            albums = self.catalog.albums_by_slug(selected)
-            done = [a for a, d in albums.items()
-                    if d["read"] and self.catalog.album_totals(a, d["formats"], s)["downloaded"]]
             want = extras.plan(self, s, done)
             mode = int(parse_mode(s.get("file_mode", "")), 8) if parse_mode(s.get("file_mode", "")) else None
             fetched = await extras.fetch_covers(client, want, have) if client is not None else {}
@@ -967,82 +1049,125 @@ class Engine:
         except Exception as e:
             log.warning("Could not write the playlists / folder images: %r", e)
 
-    async def _embed_covers(self, client, manifest) -> None:
-        """Put each ticked, downloaded album's cover into its music files that have none (covers.py).
-        Each file once; never fails a sync."""
+    async def _tag_files(self, client, manifest, finished=None) -> None:
+        """Into each ticked, downloaded album's music files: its cover (`embed_cover`) and the tags
+        they lack (`write_tags`) - covers.py. Each file once; never fails a sync."""
         from . import covers
         s = self.catalog.settings()
-        if not s.get("embed_cover"):
+        want_cover, want_tags = bool(s.get("embed_cover")), bool(s.get("write_tags"))
+        if not (want_cover or want_tags):
             return
         if not covers.available():
-            log.warning("Covers can't be put into the music files: the mutagen package is missing "
+            log.warning("Covers and tags can't be put into the music files: the mutagen package is missing "
                         "(pip install mutagen)")
             return
         try:
-            selected = set(self.catalog.selected_albums(None, s.get("platform_types") or []))
-            albums = self.catalog.albums_by_slug(selected)
-            done = [a for a, d in albums.items()
-                    if d["read"] and self.catalog.album_totals(a, d["formats"], s)["downloaded"]]
-            todo = self.catalog.uncovered(done)
+            s, _selected, done = finished or self._finished_albums()
+            todo = self.catalog.untagged(done, want_cover, want_tags)
             if not todo:
                 return
             root = self.data_dir
             with self.catalog.lock:
                 firsts = {a: (url, rel, local) for a, url, rel, local in self.catalog.db.execute(
                     "SELECT album, url, rel, local FROM files WHERE kind='art' ORDER BY album, pos DESC")}
+            albums = self.catalog.albums_by_slug({f["album"] for f in todo})
             counts = collections.Counter()
-            self.job["phase"] = "putting covers into the music files"
+            self.job["phase"] = "putting covers and tags into the music files"
             by_album: dict = {}
-            for row in todo:
-                by_album.setdefault(row[2], []).append(row)
-            for slug, rows in by_album.items():
+            for f in todo:
+                by_album.setdefault(f["album"], []).append(f)
+            for slug, files in by_album.items():
                 if self.stop_requested:
                     break
-                data = None
-                first = firsts.get(slug)
-                if first and first[2] in SYNCED_WORDS:
-                    try:
-                        with open(os.path.join(root, *first[1].split("/")), "rb") as f:
-                            data = f.read()
-                    except OSError:
-                        data = None
-                if data is None and first and client is not None:
-                    try:
-                        r = await client.get(first[0])
-                        data = r.content if r.status_code == 200 else None
-                    except Exception:
-                        data = None
-                mime = covers.mime_of(data or b"")
-                if not first or not mime:
-                    for url, *_ in rows:
-                        self.catalog.set_cover(url, "skipped" if not first else None)
-                    counts["no cover" if not first else "cover not loaded"] += len(rows)
-                    continue
+                a = albums.get(slug) or {}
+                cover = None
+                if want_cover and any(f["cover"] is None for f in files):
+                    cover = await self._cover_bytes(client, firsts.get(slug), root)
+                    if cover is None:
+                        counts["in albums without images" if not firsts.get(slug)
+                               else "waiting for their cover (couldn't load it)"] += len(files)
+                layout = self.catalog.track_layout(slug) if want_tags else {}
+                discs = sorted({d for (_e, d) in layout if d})
 
-                def tag_all(rows=rows, data=data, mime=mime) -> list:
+                def tags_of(f) -> dict:
+                    tracks = layout.get((f["ext"], f["disc"] or ""), [])
+                    num = (f["num"] or "").strip().rstrip(".")
+                    if not num.isdigit():
+                        num = str(next((i for i, (_n, p) in enumerate(tracks, 1) if p == f["pos"]), 0) or "")
+                    disc = (f["disc"] or "").strip()
+                    year = a.get("year") or ""
+                    return {"title": (f["title"] or "").strip() or os.path.splitext(f["name"] or "")[0],
+                            "album": a.get("title") or a.get("name") or "",
+                            "track": int(num) if num.isdigit() else None, "tracks": len(tracks) or None,
+                            "disc": int(disc) if disc.isdigit() else None,
+                            "discs": len(discs) if disc.isdigit() and discs else None,
+                            "year": year if len(year) == 4 and year.isdigit() else None}
+
+                no_cover = not firsts.get(slug)        # the album has no images at all
+
+                def tag_all(files=files, cover=cover, no_cover=no_cover) -> list:
                     out = []
-                    for url, rel, _album, ext in rows:
-                        path = os.path.join(root, *rel.split("/"))
+                    for f in files:
+                        path = os.path.join(root, *f["rel"].split("/"))
+                        c = cover if (f["cover"] is None and want_cover) else None
+                        t = tags_of(f) if (f["tags"] is None and want_tags) else None
+                        if c is None and t is None:      # nothing to do now - no need to open the file
+                            out.append((f, "skipped" if (no_cover and want_cover and f["cover"] is None) else None,
+                                        None, None))
+                            continue
                         try:
-                            res = covers.embed(path, ext, data, mime)
+                            rc, rt = covers.update(path, f["ext"], c, t)
                         except Exception as e:  # a file mutagen can't read stays as it was
-                            log.warning("could not put the cover into %s: %s", rel, e)
-                            res = "skipped"
-                        out.append((url, rel, res, os.path.getsize(path) if res == "added" else None))
+                            log.warning("could not tag %s: %s", f["rel"], e)
+                            rc, rt = ("skipped" if c else None), ("skipped" if t is not None else None)
+                        changed = "added" in (rc, rt)
+                        out.append((f, rc, rt, os.path.getsize(path) if changed else None))
                     return out
 
-                for url, rel, res, size in await asyncio.to_thread(tag_all):
-                    self.catalog.set_cover(url, res, size)
+                for f, rc, rt, size in await asyncio.to_thread(tag_all):
+                    self.catalog.set_tagged(f["url"], rc, rt, size)
                     if size is not None:
-                        manifest.resized(rel, size)
-                    counts[res] += 1
+                        manifest.resized(f["rel"], size)
+                    if rc:
+                        counts["cover " + rc] += 1
+                    if rt:
+                        counts["tags " + rt] += 1
             manifest.commit()
             self.catalog.commit()
             self._sel_cache = None
-            log.info("Covers: put into %d files, %d already had one%s", counts["added"], counts["had"],
-                     "".join(f", {n} {k}" for k, n in counts.items() if k not in ("added", "had") and n))
+            parts = []
+            if want_cover:
+                parts.append(f"cover put into {counts['cover added']} files ({counts['cover had']} already had one)")
+            if want_tags:
+                parts.append(f"missing tags filled in for {counts['tags added']} files "
+                             f"({counts['tags had']} were complete)")
+            extra = "".join(f", {n} {k}" for k, n in counts.items()
+                            if k not in ("cover added", "cover had", "tags added", "tags had") and n)
+            log.info("Music files: %s%s", "; ".join(parts), extra)
         except Exception as e:
-            log.warning("Could not put the covers into the music files: %r", e)
+            log.warning("Could not put covers / tags into the music files: %r", e)
+
+    async def _cover_bytes(self, client, first, root: str) -> Optional[tuple]:
+        """The album's cover (its first image) as (data, mime): from the download folder when it
+        was synced, else fetched. None when there's none or it couldn't be loaded."""
+        from . import covers
+        if not first:
+            return None
+        data = None
+        if first[2] in SYNCED_WORDS:
+            try:
+                with open(os.path.join(root, *first[1].split("/")), "rb") as f:
+                    data = f.read()
+            except OSError:
+                data = None
+        if data is None and client is not None:
+            try:
+                r = await client.get(first[0])
+                data = r.content if r.status_code == 200 else None
+            except Exception:
+                data = None
+        mime = covers.mime_of(data or b"")
+        return (data, mime) if mime else None
 
     async def read_album_now(self, slug: str) -> dict:
         """Read one album's page right away (opening an album in the page), outside the job queue."""
@@ -1060,7 +1185,19 @@ class Engine:
         from . import cleanup
         s = self.catalog.settings()
         self.catalog.commit()
-        files = await asyncio.to_thread(lambda: cleanup.find(self, s, cleanup.walk(s["data_dir"])))
+        # how many files to expect: what the app saved (other files in the folder add to it)
+        expected = len(self.catalog.saved_files()) + len(self.catalog.extras())
+        prog = self.cleanup_progress = {"files": 0, "folders": 0, "expected": expected, "started": time.time(),
+                                        "step": "walking"}
+
+        def run():
+            disk = cleanup.walk(s["data_dir"], prog)
+            prog["step"] = "judging"
+            return cleanup.find(self, s, disk)
+        try:
+            files = await asyncio.to_thread(run)
+        finally:
+            self.cleanup_progress = None
         self.leftovers = dict(cleanup.summary(files), checked=time.time())
         return files
 
@@ -1170,6 +1307,12 @@ class Engine:
         }
         if self.scanner is not None:
             out["scan"] = self.scanner.progress()
+        if self.cleanup_progress is not None:
+            p = dict(self.cleanup_progress)
+            spent = time.time() - p["started"]
+            rate = p["files"] / spent if spent > 1 and p["files"] else 0
+            p["eta"] = round(max(0, p["expected"] - p["files"]) / rate) if rate and p["step"] == "walking" else None
+            out["cleanup"] = p
         if self.check_progress is not None and self.busy:
             p = dict(self.check_progress)
             spent = time.time() - p["started"]

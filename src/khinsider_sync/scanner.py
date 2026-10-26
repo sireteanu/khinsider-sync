@@ -226,6 +226,7 @@ class Scanner:
         updates listed ones; removes nothing. status "incomplete" when it couldn't reach `since`
         within max_pages (a full scan is needed then)."""
         self._start("latest")
+        self.replaced = []
         scan_id = self.catalog.start_scan("quick")
         log.info("Reading khinsider's newest albums (back to %s)", since)
         status, oldest, page, pages = "incomplete", None, 0, 1
@@ -246,6 +247,7 @@ class Scanner:
                 log.warning("the home page lists no newest albums - has khinsider changed? (page %d)", page)
                 break
             rows = [a for _d, albums in days for a in albums]
+            self.replaced += self.catalog.mark_replaced((a["slug"], d) for d, albums in days for a in albums)
             by_letter: dict = {}
             for a in rows:
                 by_letter.setdefault(parse.letter_of(a["name"]), []).append(a)
@@ -262,11 +264,17 @@ class Scanner:
             status = "stopped"
         named = self.catalog.assign_folders(name_of)
         self.catalog.finish_scan(scan_id, self.pages, self.albums, status)
+        if self.replaced:
+            names = self.catalog.albums_by_slug(self.replaced)
+            log.info("khinsider replaced %d albums with another version (%s) - the next sync that includes "
+                     "them reads their pages again and gets what changed", len(self.replaced),
+                     ", ".join(names[s]["name"] for s in self.replaced[:5] if s in names)
+                     + (" ..." if len(self.replaced) > 5 else ""))
         log.info("Newest albums %s: %d pages, %d albums listed, %d new%s", status, self.pages, self.albums, self.new,
                  f" - not back to {since} after {self.pages} pages: a full scan is needed"
                  if status == "incomplete" and not self.errors else "")
         return {"pages": self.pages, "albums": self.albums, "new": self.new, "errors": self.errors,
-                "status": status, "named": named, "oldest": oldest}
+                "status": status, "named": named, "oldest": oldest, "replaced": list(self.replaced)}
 
     async def _follow_moved(self, scan_id: int) -> None:
         """Albums you downloaded that the lists no longer show may have moved to a new address

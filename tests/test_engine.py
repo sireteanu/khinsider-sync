@@ -341,12 +341,29 @@ def test_folder_image_without_syncing_images(site, app_factory):
     assert not site.file_requests(), "fetched once, not at every sync"
 
 
-def test_a_png_cover_becomes_folder_png(site, app_factory):
+def test_a_png_cover_becomes_a_real_folder_jpg(site, app_factory):
+    from PIL import Image
     site.add_album("png-cover-ost", "PNG Cover OST", images=["BTD3.png", "other.jpg"])
     c = app_factory(site, settings={"folder_art": True})
     first_sync(c, "a:png-cover-ost")
     files = on_disk(c.data)
-    assert "PNG Cover OST/folder.png" in files and "PNG Cover OST/folder.jpg" not in files
+    assert "PNG Cover OST/folder.jpg" in files and "PNG Cover OST/folder.png" not in files
+    with Image.open(c.data / "PNG Cover OST" / "folder.jpg") as im:
+        assert im.format == "JPEG" and im.size == (4, 4)
+        assert im.getpixel((3, 0))[0] < 30, "see-through parts on black"
+
+
+def test_without_pillow_a_png_cover_stays_folder_png(site, app_factory, monkeypatch):
+    from khinsider_sync import extras
+    monkeypatch.setattr(extras, "can_convert", lambda: False)
+    site.add_album("png-cover-ost", "PNG Cover OST", images=["BTD3.png"])
+    c = app_factory(site, settings={"folder_art": True})
+    first_sync(c, "a:png-cover-ost")
+    assert "PNG Cover OST/folder.png" in on_disk(c.data)
+    monkeypatch.setattr(extras, "can_convert", lambda: True)       # Pillow installed later
+    sync(c)
+    files = on_disk(c.data)
+    assert "PNG Cover OST/folder.jpg" in files and "PNG Cover OST/folder.png" not in files
 
 
 def pictures(path):
@@ -364,16 +381,16 @@ def test_cover_embedded_into_mp3_files(site, app_factory):
     cover = (album_dir / "Cover.jpg").read_bytes()
     for name in ("01. Nintendo Logo.mp3", "02. Title Screen.mp3", "03. Overworld.mp3"):
         assert pictures(album_dir / name) == [cover]
-    assert any("Covers: put into 3 files, 0 already had one" in m for m in log_lines(st))
+    assert any("cover put into 3 files (0 already had one)" in m for m in log_lines(st))
     t = time.localtime(os.stat(album_dir / "01. Nintendo Logo.mp3").st_mtime)
     assert time.strftime("%Y-%m-%d %H:%M", t) == "2025-04-24 12:00", "the album's date stays"
     # the new sizes are remembered: a check doesn't take tagged files for damaged ones
     assert c.post("/api/check").status_code == 200
     assert "all 4 downloaded files are there" in wait(c)["job"]["message"]
-    before = sum("Covers:" in m for m in log_lines(st))
+    before = sum("Music files:" in m for m in log_lines(st))
     site.reset_log()
     st = sync(c)
-    assert sum("Covers:" in m for m in log_lines(st)) == before and not site.file_requests(), "each file once"
+    assert sum("Music files:" in m for m in log_lines(st)) == before and not site.file_requests(), "each file once"
 
 
 def test_a_picture_already_in_the_file_is_kept(site, app_factory):
@@ -388,7 +405,7 @@ def test_a_picture_already_in_the_file_is_kept(site, app_factory):
     st = sync(c)
     assert pictures(album_dir / "01. Nintendo Logo.mp3") == [b"\xff\xd8\xff theirs"]
     assert pictures(album_dir / "02. Title Screen.mp3") == [(album_dir / "Cover.jpg").read_bytes()]
-    assert any("Covers: put into 2 files, 1 already had one" in m for m in log_lines(st))
+    assert any("cover put into 2 files (1 already had one)" in m for m in log_lines(st))
 
 
 def test_cover_embedded_into_flac_without_syncing_images(site, app_factory):
@@ -398,6 +415,42 @@ def test_cover_embedded_into_flac_without_syncing_images(site, app_factory):
     assert not any(f.endswith(".jpg") for f in files), "images still aren't synced"
     pics = pictures(c.data / "Super Mario World" / "01. Nintendo Logo.flac")
     assert len(pics) == 1 and pics[0][:3] == b"\xff\xd8\xff"
+
+
+def test_missing_tags_are_filled_in_and_existing_ones_kept(site, app_factory):
+    from mutagen.id3 import ID3, TIT2
+    c = app_factory(site)
+    first_sync(c, "a:persona-5")
+    d = c.data / "PERSONA5 ORIGINAL SOUNDTRACK"
+    t = ID3(d / "1-02. Phantom.mp3")
+    t.add(TIT2(encoding=3, text="My own title"))
+    t.save()
+    c.post("/api/settings", json={"write_tags": True})
+    st = sync(c)
+    t = ID3(d / "1-01. Wake Up, Get Up, Get Out There.mp3")
+    assert str(t["TIT2"]) == "Wake Up, Get Up, Get Out There"
+    assert str(t["TALB"]) == "PERSONA5 ORIGINAL SOUNDTRACK"
+    assert str(t["TRCK"]) == "1/2" and str(t["TPOS"]) == "1/2" and str(t["TDRC"]) == "2017"
+    assert str(ID3(d / "2-01. Beneath the Mask.mp3")["TRCK"]) == "1/1"
+    t = ID3(d / "1-02. Phantom.mp3")
+    assert str(t["TIT2"]) == "My own title" and str(t["TRCK"]) == "2/2", "kept; only the missing ones added"
+    assert any("missing tags filled in for 3 files" in m for m in log_lines(st))
+    assert c.post("/api/check").status_code == 200
+    assert "all 5 downloaded files are there" in wait(c)["job"]["message"]
+
+
+def test_tags_for_flac_and_tracks_without_numbers(site, app_factory):
+    from mutagen.flac import FLAC
+    from mutagen.id3 import ID3
+    c = app_factory(site, settings={"write_tags": True, "embed_cover": True, "formats": "all:.mp3,.flac,art"})
+    first_sync(c)
+    f = FLAC(c.data / "Super Mario World" / "03. Overworld.flac")
+    assert f["title"] == ["Overworld"] and f["tracknumber"] == ["3"] and f["tracktotal"] == ["3"]
+    assert f["date"] == ["1990"] and len(f.pictures) == 1
+    select(c, "a:" + BIRD)
+    sync(c)
+    t = ID3(c.data / "A Bird Story" / "Yesterday - Kan (Reives) Gao.mp3")     # no # column on its page
+    assert str(t["TRCK"]) == "2/2" and str(t["TIT2"]) == "Yesterday - Kan (Reives) Gao"
 
 
 def test_folder_images_never_replace_your_own_and_go_when_turned_off(site, app_factory):
@@ -410,6 +463,33 @@ def test_folder_images_never_replace_your_own_and_go_when_turned_off(site, app_f
     sync(c)
     assert not (c.data / "Super Mario World" / "Super Mario World.m3u8").exists()
     assert (c.data / "Super Mario World" / "folder.jpg").read_bytes() == b"mine"
+
+
+def test_an_album_khinsider_replaced_is_read_again_and_updated(site, app_factory):
+    c = app_factory(site)
+    first_sync(c)
+    # khinsider puts up another version: a track changes, the album shows up among the newest
+    site.modify(SMW, "02. Title Screen.mp3", grow=500)
+    site.albums[SMW]["added"] = time.strftime("%b %d, %Y").replace(" 0", " ")
+    assert c.post("/api/scan", json={"quick": True}).status_code == 200
+    st = wait(c)
+    assert any("khinsider replaced 1 albums with another version (Super Mario World)" in m for m in log_lines(st))
+    assert albums(c)[SMW]["changed"]
+    st = sync(c)
+    assert st["sync"]["updated"] == 4, "a new version: every file again (its Date Added changed)"
+    assert os.path.getsize(c.data / "Super Mario World" / "02. Title Screen.mp3") > 30_000
+    d = album(c, SMW)["album"]
+    assert d["downloaded"] and not d["changed"]
+    site.reset_log()
+    assert sync(c)["sync"]["albums_done"] == 1 and not site.file_requests(), "done again"
+
+
+def test_a_full_scan_also_notices_replaced_albums(site, app_factory):
+    c = app_factory(site)
+    first_sync(c)
+    site.albums[SMW]["added"] = time.strftime("%b %d, %Y").replace(" 0", " ")
+    scan(c)
+    assert albums(c)[SMW]["changed"]
 
 
 def test_files_already_in_the_folder_are_adopted(site, app_factory):

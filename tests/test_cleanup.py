@@ -78,3 +78,32 @@ def test_cannot_delete_while_a_sync_runs(site_factory, app_factory):
     assert r.status_code == 409
     c.post("/api/stop")
     assert wait(c)["job"]["phase"] == "stopped"
+
+
+def test_clean_up_reports_how_far_it_has_looked(site, app_factory, monkeypatch):
+    import threading
+    import time
+    from khinsider_sync import cleanup
+    c = app_factory(site)
+    scan(c)
+    select(c, "a:" + SMW)
+    sync(c)
+    real = cleanup.find
+
+    def slow(*a, **k):
+        time.sleep(1.0)
+        return real(*a, **k)
+    monkeypatch.setattr(cleanup, "find", slow)
+    out = {}
+    t = threading.Thread(target=lambda: out.setdefault("r", c.get("/api/cleanup").json()))
+    t.start()
+    seen = []
+    while t.is_alive():
+        st = c.get("/api/status").json()
+        if st.get("cleanup"):
+            seen.append(st["cleanup"])
+        time.sleep(0.1)
+    t.join()
+    assert seen and seen[-1]["files"] == 4 and seen[-1]["expected"] == 4 and seen[-1]["step"] == "judging"
+    assert "cleanup" not in c.get("/api/status").json(), "gone once it has finished"
+    assert out["r"]["files"] == []

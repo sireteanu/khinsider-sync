@@ -54,9 +54,12 @@ modest, don't sync the whole site, and consider [donating](https://downloads.khi
 | Folders | One folder per album, named after the album (clashing names get the type and year added). Optionally grouped by platform, type or year. **Saved as** puts one album anywhere you like. Changing either **moves** what you already have instead of downloading it again. |
 | Sync | Reads each ticked album's page once (the first time it's synced or opened), then downloads what's missing or half-finished (`.part`, resumed). khinsider doesn't change albums once they're up, so **an album that is downloaded is done**: later syncs skip it without a request or a look at the disk. |
 | Downloaded albums | The album list marks every album as **Downloaded** or **Partly downloaded** (with the date in its tooltip and window), the filter shows Downloaded / Partly downloaded / Not downloaded, and the top strip counts "12 of 13 albums downloaded". **Check files** in an album's window looks for files you deleted; **Check download folder** (☰ menu) does that for every downloaded album at once - disk only, no requests. The next sync downloads the missing files again. |
+| Replaced albums | khinsider sometimes replaces an album with another version (its "Change Log" says "replaced by a different version"); the album then shows up again among the newest albums with a new Date Added. Every scan (quick or full) reads that list, marks such albums **New version**, and the next sync that includes them reads their page again and downloads the album again (a new version: every file). |
+| Tags | Optional: fill in the tags khinsider's files usually lack - title, album, track and disc number with totals, year - from the album page. Only missing tags are added; anything already there is kept. Done in the same pass as the cover, once per file. |
+| Notifications | Optional: a message to ntfy, Gotify, a Discord webhook or a Home Assistant webhook when a sync downloaded something (which albums), when new albums turn up for your ticked platforms, and when something needs a look (sync paused, job failed). **Send a test** in Settings. |
 | Upgrading | An album's window offers **Upgrade to FLAC** (or another format the album has that is better than what you downloaded: FLAC, WAV, APE, WV, M4A, OPUS, OGG, AAC, MP3). The album gets that format as its own formats and is ticked; once a sync has every new file, it deletes the album's files of the old format (images stay) and logs them in the Activity log as "Replaced by FLAC". Until then the old files stay and Clean up leaves them alone. **Cancel upgrade** puts the album's formats back. **Replace old formats** (Settings) does the same for every ticked album whenever the formats setting changes - switch to FLAC and the MP3s go once the FLACs are in. |
 | One album now | **Sync now** in an album's window syncs just that album (and ticks it). |
-| Playlists and covers | Optional: `<album>.m3u8` (track order, lengths, titles) and `folder.jpg` (khinsider's cover for the album: the first image on its page - the one its own lists show - copied from the downloaded images, or fetched on its own when images aren't synced; a PNG cover becomes `folder.png`) in each downloaded album's folder, for Plex, Jellyfin, Kodi and players. They move with the album, go when turned off, and Clean up lists them with an unticked album's music. A `folder.jpg` of your own is never replaced. **Put the cover into each music file** (optional) adds the same cover to MP3, FLAC, M4A and OGG/Opus files that carry no picture yet - pictures already inside are kept. Each file is tagged once, on a copy that replaces it, keeping its date and permissions; the download record learns the new size, so checks don't take it for a damaged file. |
+| Playlists and covers | Optional: `<album>.m3u8` (track order, lengths, titles) and `folder.jpg` (khinsider's cover for the album: the first image on its page - the one its own lists show - copied from the downloaded images, or fetched on its own when images aren't synced; a PNG cover is converted to JPEG - see-through parts on black - or saved as `folder.png` without Pillow) in each downloaded album's folder, for Plex, Jellyfin, Kodi and players. They move with the album, go when turned off, and Clean up lists them with an unticked album's music. A `folder.jpg` of your own is never replaced. **Put the cover into each music file** (optional) adds the same cover to MP3, FLAC, M4A and OGG/Opus files that carry no picture yet - pictures already inside are kept. Each file is tagged once, on a copy that replaces it, keeping its date and permissions; the download record learns the new size, so checks don't take it for a damaged file. |
 | Dates | Each saved file gets the album's "Date Added" (12:00 local time); folders get the date of their newest file. |
 | Renamed albums | When khinsider moves an album to a new address, its tick, Saved as and folder follow it. |
 | Permissions | Downloaded files and new folders get mode **777** by default (setting). |
@@ -287,6 +290,9 @@ Stored in the catalog (`settings` table); changed in the Settings dialog or `POS
 | `art_folder` | `false` | Images in `<album>/Art/` |
 | `replace_formats` | `false` | Once a ticked album is downloaded in the formats now wanted, delete its music files of formats no longer wanted |
 | `playlists` | `false` | Write `<album folder>.m3u8` in each downloaded album's folder |
+| `write_tags` | `false` | Fill in missing title / album / track / disc / year tags from the album page (needs mutagen) |
+| `notify_url` | `""` | Where notifications go: ntfy topic, Gotify `/message?token=…`, Discord webhook, Home Assistant webhook, any URL taking JSON `{title, message, body}`; empty = off |
+| `notify_on` | all | Which: `downloads`, `new_albums`, `problems` |
 | `embed_cover` | `false` | Put the album's cover into each downloaded music file that has no picture (MP3, FLAC, M4A, OGG/Opus; needs mutagen) |
 | `folder_art` | `false` | Save each downloaded album's cover (its first image) as `folder.jpg` / `folder.png`, also when images aren't synced |
 | `impersonate` | `true` | Look like Chrome (needs curl_cffi) |
@@ -360,7 +366,8 @@ All JSON; the page uses nothing else.
 | `GET /api/history` | Last jobs |
 | `GET /api/sync/files?kind=` | Files behind an Activity counter (`new`, `updated`, `resumed`, `uptodate`, `failed`) |
 | `GET /api/changes/days` · `GET /api/changes?day=&kind=` | Activity log |
-| `GET /api/cleanup` · `POST /api/cleanup/delete` `{paths, confirm: true}` | Clean up |
+| `GET /api/cleanup` · `POST /api/cleanup/delete` `{paths, confirm: true}` | Clean up (while it looks through the folder, `/api/status` has `cleanup: {files, expected, step, eta}`) |
+| `POST /api/notify/test` `{url}` | Send a test notification to that address (not saved); 400 with the reason when it fails |
 | `POST /api/restart` · `POST /api/shutdown` | Restart / end the program |
 | `GET /api/health` | `{"ok": true}` (no password) |
 
@@ -378,7 +385,8 @@ src/khinsider_sync/
   scanner.py    scan_site() (platform list + browse pages), scan_latest() (home page), read_albums()
   parse.py      page readers: parse_browse, parse_latest, parse_album, parse_track, parse_platforms
   extras.py     playlists and folder images next to downloaded albums
-  covers.py     the cover embedded into music files (mutagen)
+  covers.py     the cover and missing tags put into music files (mutagen)
+  notify.py     notifications (ntfy / Gotify / Discord / webhooks)
   cleanup.py    Clean up: walk the download folder, judge files, delete confirmed ones
   static/       index.html, app.css, app.js - no build step, no CDN
   core/         the sync engine from Rom Sync (download.py with the `resolve` hook, sync.py, limits.py ...)

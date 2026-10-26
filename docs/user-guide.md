@@ -48,10 +48,12 @@ to see just those.
   album's disc and track numbers.
 - **Art folder**: put the images in an `Art` folder inside each album's folder.
 - **Playlist** and **folder.jpg**: a playlist and the album's cover (the picture khinsider shows for it,
-  also when you don't sync images; a PNG cover is saved as folder.png) in each downloaded album's
+  also when you don't sync images; PNG covers are turned into a JPEG) in each downloaded album's
   folder, for Plex, Jellyfin, Kodi and music players.
 - **Put the cover into each music file**: the same cover inside the MP3, FLAC, M4A and OGG files, for
   players that only read tags. Files that already have a picture keep theirs.
+- **Fill in missing tags**: khinsider's files often have no title, album or track number, so players
+  show "unknown album". This fills them in from the album page; tags already there are kept.
 - **Folders**: one folder per album, or grouped by platform, type or year.
 - **A ticked platform brings in these album types**: e.g. tick only *Gamerip* so ticking SNES
   doesn't also bring in every arrangement and remix.
@@ -72,8 +74,9 @@ pages instead of files (too many downloads), the sync pauses; the next one finis
 
 ## 6. Downloaded albums are done
 
-khinsider doesn't change albums once they're up, so once an album is downloaded, syncs leave it
-alone - they don't ask khinsider about it or look through its files again. If you deleted some of
+Once an album is downloaded, syncs leave it alone - they don't ask khinsider about it or look
+through its files again. The exception: when khinsider **replaces an album with another version**,
+the album is marked **New version** and the next sync downloads it again. If you deleted some of
 its files by hand, open the album and click **Check files**: the next sync gets the missing ones.
 To check every album at once, use **Check download folder** in the ☰ menu (it only looks at your
 disk; it doesn't ask khinsider anything). It also notices files that were cut short. The Activity
@@ -99,6 +102,10 @@ platforms arrive by themselves. **Scan for new albums** in the ☰ menu does the
 **Before a scheduled sync, check the download folder** is off by default: checking looks at every
 file you downloaded, which wakes the disks (on Unraid, the array). Pick once a day, week or month if
 you want it.
+
+**Notifications**: in Settings, paste an ntfy topic, a Gotify, Discord or Home Assistant webhook
+address and click **Send a test**. You hear when downloads finish, when new albums arrive for your
+ticked platforms, and when something needs a look.
 
 ## 8. Clean up
 

@@ -3,7 +3,8 @@
   playlists   "<album folder>.m3u8" - the album's music in track order (#EXTINF with length and
               title, paths relative to the playlist), one format: the first the album's formats
               setting puts first
-  folder_art  "folder.jpg" (folder.png for a PNG cover) - the album's cover: its FIRST image, which is
+  folder_art  "folder.jpg" - the album's cover (a PNG cover converted to JPEG with Pillow; without
+              Pillow it stays folder.png): its FIRST image, which is
               the one khinsider shows for the album in its own lists (checked on the real site,
               October 2026 - the names say nothing: "BTD3.png", "SLPS-03515.jpg", "106282_front.jpg").
               Copied from the downloaded image, or - when images aren't synced - fetched on its own
@@ -28,6 +29,30 @@ from .core.util import fs_path
 log = logging.getLogger("khinsider_sync")
 
 COVER_EXTS = (".jpg", ".jpeg", ".png")
+
+
+def can_convert() -> bool:
+    """Pillow installed: PNG covers become a real folder.jpg (else folder.png)."""
+    import importlib.util
+    return importlib.util.find_spec("PIL") is not None
+
+
+def to_jpeg(data: bytes) -> bytes:
+    """A PNG (or any image) as JPEG; see-through parts on black. Pillow refuses absurdly large images."""
+    import io
+    from PIL import Image
+    with Image.open(io.BytesIO(data)) as im:
+        im.load()
+        if im.mode in ("RGBA", "LA", "P"):
+            im = im.convert("RGBA")
+            back = Image.new("RGB", im.size, (0, 0, 0))
+            back.paste(im, mask=im.getchannel("A"))
+            im = back
+        elif im.mode != "RGB":
+            im = im.convert("RGB")
+        out = io.BytesIO()
+        im.save(out, "JPEG", quality=92, optimize=True)
+        return out.getvalue()
 
 
 def seconds(duration: str) -> int:
@@ -90,13 +115,15 @@ def plan(engine, s: dict, slugs) -> dict:
         cover = covers.get(slug)
         if s.get("folder_art") and cover and cover[1] in COVER_EXTS:
             url, ext, src, local = cover
-            rel = f"{folder}/folder{'.png' if ext == '.png' else '.jpg'}"
+            convert = ext == ".png" and can_convert()
+            rel = f"{folder}/folder{'.png' if ext == '.png' and not convert else '.jpg'}"
             if src.lower() == rel.lower():
                 continue                         # the cover is already named folder.jpg
+            mark = "jpeg:" if convert else ""
             if local in SYNCED_WORDS:
-                want[rel] = (slug, "folder_art", f"copy:{src}", ("copy", src))
+                want[rel] = (slug, "folder_art", f"{mark}copy:{src}", ("copy", src, convert))
             else:
-                want[rel] = (slug, "folder_art", f"fetch:{url}", ("fetch", url))
+                want[rel] = (slug, "folder_art", f"{mark}fetch:{url}", ("fetch", url, convert))
     return want
 
 
@@ -152,13 +179,24 @@ def apply(root: str, want: dict, have: dict, own_albums: set, file_mode=None, fe
             if kind == "playlist":
                 with open(dest, "w", encoding="utf-8", newline="\n") as f:
                     f.write(what)
-            elif what[0] == "copy":
+            elif what[0] == "copy" and not what[2]:
                 shutil.copyfile(path_of(what[1]), dest)
-            elif rel in (fetched or {}):
-                with open(dest, "wb") as f:
-                    f.write(fetched[rel])
             else:
-                continue                        # its download failed: next sync
+                if what[0] == "copy":
+                    with open(path_of(what[1]), "rb") as f:
+                        data = f.read()
+                elif rel in (fetched or {}):
+                    data = fetched[rel]
+                else:
+                    continue                    # its download failed: next sync
+                if what[2]:
+                    try:
+                        data = to_jpeg(data)
+                    except Exception as e:      # not an image Pillow can read: try again next sync
+                        log.warning("could not turn the cover of %s into a JPEG: %s", rel, e)
+                        continue
+                with open(dest, "wb") as f:
+                    f.write(data)
             if os.path.exists(dest + ".part"):
                 os.remove(dest + ".part")
             if file_mode is not None:

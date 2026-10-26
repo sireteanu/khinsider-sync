@@ -177,8 +177,12 @@ function fillAlbum(el, a) {
   el.dataset.slug = a.slug;
   $(".n", el).textContent = a.name;
   const badge = $(".badge", el);
-  badge.hidden = !a.synced;
-  if (a.synced) {
+  badge.hidden = !a.synced && !a.changed;
+  if (a.changed) {
+    badge.textContent = "New version";
+    badge.className = "badge part";
+    badge.title = `khinsider replaced this album with another version on ${a.changed} - the next sync that includes it reads its page again and gets what changed`;
+  } else if (a.synced) {
     badge.textContent = a.downloaded ? "Downloaded" : "Partly downloaded";
     badge.className = "badge " + (a.downloaded ? "done" : "part");
     badge.title = a.downloaded
@@ -618,10 +622,29 @@ let wasBusy = false;
 let lastListRefresh = 0;
 
 /* Check download folder: how many of the downloaded files were looked at */
+/* Clean up's look through the folder, in the same box: files seen of about as many as were saved */
+function cleanupAsCheck(c) {
+  return { cleanup: true, done: c.files, total: Math.max(c.expected, c.files), missing: 0, eta: c.eta, step: c.step };
+}
+function cleanupText(c) {
+  if (c.step === "judging") return `Looked at ${nFiles(c.files)} - sorting out what isn't part of the sync…`;
+  return `Looked at ${num(c.files)} of about ${nFiles(Math.max(c.expected, c.files))}`
+    + (c.eta != null ? ` - about ${duration(c.eta)} left` : "");
+}
 function renderCheck(c) {
   const box = $("#check-box");
   box.hidden = !c;
   if (!c) return;
+  $("#check-title").textContent = c.cleanup ? "Clean up: looking through the download folder" : "Checking the download folder";
+  if (c.cleanup) {
+    const pct = c.step === "judging" ? 100 : Math.min(99, c.total ? (100 * c.done) / c.total : 0);
+    $("#check-count").textContent = `${num(c.done)} files`;
+    $("#check-time").textContent = c.step === "judging" ? "Finishing…" : c.eta != null ? duration(c.eta) : "working it out…";
+    $("#check-bar").style.width = pct.toFixed(1) + "%";
+    $("#check-meter").setAttribute("aria-valuenow", Math.round(pct));
+    $("#check-sub").textContent = cleanupText({ files: c.done, expected: c.total, step: c.step, eta: null });
+    return;
+  }
   const pct = c.total ? Math.min(100, (100 * c.done) / c.total) : 100;
   $("#check-count").textContent = `${num(c.done)} of ${nFiles(c.total)}`;
   $("#check-time").textContent = c.done >= c.total ? "Finishing…" : c.eta != null ? duration(c.eta) : "working it out…";
@@ -719,7 +742,7 @@ function renderStatus(st) {
     setStats(sc, pairs);
   } else sc.hidden = true;
 
-  renderCheck(busy ? st.check : null);
+  renderCheck(busy && st.check ? st.check : st.cleanup ? cleanupAsCheck(st.cleanup) : null);
   const sy = $("#sync-stats");
   renderDownloads(st.sync, syncing);
   if (st.sync) {
@@ -980,6 +1003,10 @@ $("#btn-settings").addEventListener("click", async () => {
   form.playlists.checked = !!s.playlists;
   form.folder_art.checked = !!s.folder_art;
   form.embed_cover.checked = !!s.embed_cover;
+  form.write_tags.checked = !!s.write_tags;
+  form.notify_url.value = s.notify_url || "";
+  for (const e of ["downloads", "new_albums", "problems"]) form["notify_" + e].checked = (s.notify_on || []).includes(e);
+  $("#notify-result").textContent = "";
   form.track_names.value = s.track_names || "site";
   form.impersonate.checked = s.impersonate !== false;
   const box = $("#types-list");
@@ -1015,6 +1042,15 @@ $("#btn-settings").addEventListener("click", async () => {
   $("#settings-dlg").showModal();
 });
 
+$("#notify-test").addEventListener("click", async () => {
+  const out = $("#notify-result");
+  const url = form.notify_url.value.trim();
+  if (!url) { out.textContent = "Type an address first."; out.className = "error"; return; }
+  out.textContent = "Sending…"; out.className = "";
+  try { await api("/api/notify/test", { method: "POST", body: { url } }); out.textContent = "Sent - check it arrived."; out.className = "ok"; }
+  catch (err) { out.textContent = "Didn't work: " + err.message; out.className = "error"; }
+});
+
 $("#settings-save").addEventListener("click", async (e) => {
   e.preventDefault();
   const auto = form.parallel_mode.value === "auto";
@@ -1025,6 +1061,9 @@ $("#settings-save").addEventListener("click", async (e) => {
     playlists: form.playlists.checked,
     folder_art: form.folder_art.checked,
     embed_cover: form.embed_cover.checked,
+    write_tags: form.write_tags.checked,
+    notify_url: form.notify_url.value.trim(),
+    notify_on: ["downloads", "new_albums", "problems"].filter((e) => form["notify_" + e].checked),
     track_names: form.track_names.value,
     impersonate: form.impersonate.checked,
     platform_types: [...document.querySelectorAll("#types-list input:checked")].map((i) => i.value),
@@ -1277,8 +1316,23 @@ async function openCleanup() {
   $("#clean-empty").hidden = true;
   $("#clean-foot").hidden = true;
   $("#clean-loading").hidden = false;
+  $("#clean-loading-text").textContent = "Looking through the download folder…";
+  $("#clean-bar").style.width = "0";
+  // while the server looks through the folder, its count comes with the status
+  const timer = setInterval(async () => {
+    try {
+      const st = await api("/api/status?log_since=999999999");
+      if (!st.cleanup) return;
+      const c = st.cleanup;
+      const pct = c.step === "judging" ? 100 : Math.min(99, (100 * c.files) / Math.max(c.expected, c.files, 1));
+      $("#clean-loading-text").textContent = cleanupText(c);
+      $("#clean-bar").style.width = pct.toFixed(1) + "%";
+      $("#clean-meter").setAttribute("aria-valuenow", Math.round(pct));
+    } catch (e) {}
+  }, 500);
   try { renderClean(await api("/api/cleanup")); }
   catch (e) { $("#clean-body").textContent = "Could not check the download folder: " + e.message; }
+  clearInterval(timer);
   $("#clean-loading").hidden = true;
 }
 $("#btn-cleanup").addEventListener("click", openCleanup);
