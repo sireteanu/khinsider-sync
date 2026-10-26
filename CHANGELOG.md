@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.8] - 2026-10-25
+
+### Fixed
+- folder.jpg is khinsider's own cover for the album - the first image on its page, the one the site
+  shows in its lists - instead of a guess by file name (which could pick a back cover or a scan).
+  Albums that already have a folder.jpg get the right one at the next sync.
+- folder.jpg also works when images aren't synced: the cover alone is fetched once.
+
 ## [1.0.7] - 2026-10-25
 
 ### New

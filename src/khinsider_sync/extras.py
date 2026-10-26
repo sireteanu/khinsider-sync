@@ -3,8 +3,11 @@
   playlists   "<album folder>.m3u8" - the album's music in track order (#EXTINF with length and
               title, paths relative to the playlist), one format: the first the album's formats
               setting puts first
-  folder_art  "folder.jpg" (or .png) - a copy of the album's cover (an image named cover / front /
-              folder, else its first image), for Plex, Jellyfin, Kodi, Windows Explorer
+  folder_art  "folder.jpg" (folder.png for a PNG cover) - the album's cover: its FIRST image, which is
+              the one khinsider shows for the album in its own lists (checked on the real site,
+              October 2026 - the names say nothing: "BTD3.png", "SLPS-03515.jpg", "106282_front.jpg").
+              Copied from the downloaded image, or - when images aren't synced - fetched on its own
+              (one request), so it works with any formats setting.
 
 Only for ticked albums that are completely downloaded. Each one is recorded in the catalog
 (`extras`, with a signature of its content), so a sync rewrites it only when the album's files
@@ -17,7 +20,6 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
-import re
 import shutil
 
 from .catalog import AUDIO_EXTENSIONS, SYNCED_WORDS, album_plan
@@ -25,7 +27,7 @@ from .core.util import fs_path
 
 log = logging.getLogger("khinsider_sync")
 
-COVER = re.compile(r"cover|front|folder", re.I)
+COVER_EXTS = (".jpg", ".jpeg", ".png")
 
 
 def seconds(duration: str) -> int:
@@ -39,9 +41,18 @@ def seconds(duration: str) -> int:
         return -1
 
 
+def cover_kind(data: bytes) -> str:
+    """'.jpg' / '.png' by the file's first bytes ('' for anything else)."""
+    if data[:3] == b"\xff\xd8\xff":
+        return ".jpg"
+    if data[:4] == b"\x89PNG":
+        return ".png"
+    return ""
+
+
 def plan(engine, s: dict, slugs) -> dict:
-    """{rel: (album, kind, sig, content or source rel)} the given (ticked, downloaded) albums
-    should have now."""
+    """{rel: (album, kind, sig, what)} the given (ticked, downloaded) albums should have now.
+    `what`: the playlist's text; for a folder image ("copy", saved rel) or ("fetch", image url)."""
     want = {}
     if not (s.get("playlists") or s.get("folder_art")):
         return want
@@ -51,10 +62,15 @@ def plan(engine, s: dict, slugs) -> dict:
         rows = engine.catalog.db.execute(
             f"SELECT album, ext, kind, rel, title, name, duration, local_size FROM files "
             f"WHERE local IN ({words}) ORDER BY album, pos, ext").fetchall()
+        covers = {a: (url, ext, rel, local) for a, url, ext, rel, local in engine.catalog.db.execute(
+            "SELECT album, url, ext, rel, local FROM files WHERE kind='art' ORDER BY album, pos DESC")
+            if a in albums}                          # pos DESC: the first image wins
     by_album: dict = {}
     for r in rows:
         if r[0] in albums:
             by_album.setdefault(r[0], []).append(r)
+    for slug in covers:
+        by_album.setdefault(slug, [])
     for slug, files in by_album.items():
         a = albums[slug]
         folder = engine.album_dir(a, s)
@@ -71,18 +87,39 @@ def plan(engine, s: dict, slugs) -> dict:
                 text = "\n".join(lines) + "\n"
                 base = folder.rsplit("/", 1)[-1]
                 want[f"{folder}/{base}.m3u8"] = (slug, "playlist", hashlib.sha1(text.encode()).hexdigest(), text)
-        if s.get("folder_art"):
-            images = [f for f in files if f[2] == "art" and f[1] in (".jpg", ".jpeg", ".png")]
-            pick = next((f for f in images if COVER.search(os.path.basename(f[3]))), images[0] if images else None)
-            if pick:
-                ext = ".png" if pick[1] == ".png" else ".jpg"
-                rel = f"{folder}/folder{ext}"
-                if pick[3].lower() != rel.lower():
-                    want[rel] = (slug, "folder_art", f"{pick[3]}:{pick[7]}", pick[3])
+        cover = covers.get(slug)
+        if s.get("folder_art") and cover and cover[1] in COVER_EXTS:
+            url, ext, src, local = cover
+            rel = f"{folder}/folder{'.png' if ext == '.png' else '.jpg'}"
+            if src.lower() == rel.lower():
+                continue                         # the cover is already named folder.jpg
+            if local in SYNCED_WORDS:
+                want[rel] = (slug, "folder_art", f"copy:{src}", ("copy", src))
+            else:
+                want[rel] = (slug, "folder_art", f"fetch:{url}", ("fetch", url))
     return want
 
 
-def apply(root: str, want: dict, have: dict, own_albums: set, file_mode=None) -> tuple:
+async def fetch_covers(client, want: dict, have: dict) -> dict:
+    """Download the covers that aren't synced as images ("fetch") and aren't written yet -> {rel: bytes}.
+    Anything that isn't a JPEG/PNG image (an error page, a challenge) is skipped and tried next time."""
+    got = {}
+    for rel, (album, kind, sig, what) in want.items():
+        if kind != "folder_art" or what[0] != "fetch" or (have.get(rel) or (None, None, None))[2] == sig:
+            continue
+        try:
+            r = await client.get(what[1])
+        except Exception as e:  # never fail a sync over a cover
+            log.warning("could not fetch the cover for %s: %s", rel, e)
+            continue
+        if r.status_code != 200 or not cover_kind(r.content):
+            log.warning("could not fetch the cover for %s (HTTP %s, not an image)", rel, r.status_code)
+            continue
+        got[rel] = r.content
+    return got
+
+
+def apply(root: str, want: dict, have: dict, own_albums: set, file_mode=None, fetched=None) -> tuple:
     """Write what changed, remove what is no longer wanted (only for albums in `own_albums`: those
     of unticked albums wait for Clean up). Runs in a thread. -> (written {rel: (album, kind, sig)},
     removed [rel], dirs left)."""
@@ -115,8 +152,15 @@ def apply(root: str, want: dict, have: dict, own_albums: set, file_mode=None) ->
             if kind == "playlist":
                 with open(dest, "w", encoding="utf-8", newline="\n") as f:
                     f.write(what)
+            elif what[0] == "copy":
+                shutil.copyfile(path_of(what[1]), dest)
+            elif rel in (fetched or {}):
+                with open(dest, "wb") as f:
+                    f.write(fetched[rel])
             else:
-                shutil.copyfile(path_of(what), dest)
+                continue                        # its download failed: next sync
+            if os.path.exists(dest + ".part"):
+                os.remove(dest + ".part")
             if file_mode is not None:
                 try:
                     os.chmod(dest, file_mode)

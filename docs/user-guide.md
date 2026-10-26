@@ -47,7 +47,8 @@ to see just those.
 - **Track names**: as khinsider names them, or `01 - Title.mp3` / `1-01 - Title.flac` from the
   album's disc and track numbers.
 - **Art folder**: put the images in an `Art` folder inside each album's folder.
-- **Playlist** and **folder.jpg**: a playlist and a copy of the cover in each downloaded album's
+- **Playlist** and **folder.jpg**: a playlist and the album's cover (the picture khinsider shows for it,
+  also when you don't sync images; a PNG cover is saved as folder.png) in each downloaded album's
   folder, for Plex, Jellyfin, Kodi and music players.
 - **Folders**: one folder per album, or grouped by platform, type or year.
 - **A ticked platform brings in these album types**: e.g. tick only *Gamerip* so ticking SNES

@@ -294,6 +294,35 @@ def test_playlists_and_folder_images(site, app_factory):
     assert r.status_code == 200 and not (c.data / "SNES").exists()
 
 
+def test_folder_image_is_khinsiders_cover_the_first_image(site, app_factory):
+    site.add_album("odd-names-ost", "Odd Names OST", images=["SLPS-03515.jpg", "Back Cover.jpg"])
+    c = app_factory(site, settings={"folder_art": True})
+    first_sync(c, "a:odd-names-ost")
+    folder = c.data / "Odd Names OST" / "folder.jpg"
+    assert folder.read_bytes() == (c.data / "Odd Names OST" / "SLPS-03515.jpg").read_bytes(), \
+        "the first image, whatever its name - not the one called 'cover'"
+
+
+def test_folder_image_without_syncing_images(site, app_factory):
+    c = app_factory(site, settings={"folder_art": True, "album_art": False})
+    first_sync(c, "a:persona-5")
+    files = on_disk(c.data)
+    assert "PERSONA5 ORIGINAL SOUNDTRACK/folder.jpg" in files, "fetched on its own"
+    assert "PERSONA5 ORIGINAL SOUNDTRACK/Cover.jpg" not in files, "images still aren't synced"
+    assert (c.data / "PERSONA5 ORIGINAL SOUNDTRACK" / "folder.jpg").read_bytes()[:3] == b"\xff\xd8\xff"
+    site.reset_log()
+    sync(c)
+    assert not site.file_requests(), "fetched once, not at every sync"
+
+
+def test_a_png_cover_becomes_folder_png(site, app_factory):
+    site.add_album("png-cover-ost", "PNG Cover OST", images=["BTD3.png", "other.jpg"])
+    c = app_factory(site, settings={"folder_art": True})
+    first_sync(c, "a:png-cover-ost")
+    files = on_disk(c.data)
+    assert "PNG Cover OST/folder.png" in files and "PNG Cover OST/folder.jpg" not in files
+
+
 def test_folder_images_never_replace_your_own_and_go_when_turned_off(site, app_factory):
     c = app_factory(site, settings={"folder_art": True, "playlists": True})
     os.makedirs(c.data / "Super Mario World")

@@ -711,7 +711,7 @@ class Engine:
                 manifest.commit()
                 self.catalog.commit()
                 await self._finish_upgrades()
-                await self._write_extras()
+                await self._write_extras(client)
                 await self._check_leftovers()
             best = self.gate.remembered_max()
             if best:
@@ -933,7 +933,7 @@ class Engine:
         self.catalog.commit()
         self._sel_cache = None
 
-    async def _write_extras(self) -> None:
+    async def _write_extras(self, client=None) -> None:
         """Playlists and folder images of the ticked, downloaded albums (extras.py). Never fails a sync."""
         from . import extras
         from .cleanup import remove_empty_dirs
@@ -948,7 +948,9 @@ class Engine:
                     if d["read"] and self.catalog.album_totals(a, d["formats"], s)["downloaded"]]
             want = extras.plan(self, s, done)
             mode = int(parse_mode(s.get("file_mode", "")), 8) if parse_mode(s.get("file_mode", "")) else None
-            written, removed, dirs = await asyncio.to_thread(extras.apply, self.data_dir, want, have, selected, mode)
+            fetched = await extras.fetch_covers(client, want, have) if client is not None else {}
+            written, removed, dirs = await asyncio.to_thread(extras.apply, self.data_dir, want, have, selected, mode,
+                                                             fetched)
             for rel, (album, kind, sig) in written.items():
                 self.catalog.set_extra(rel, album, kind, sig)
             self.catalog.drop_extras(removed)
