@@ -33,6 +33,7 @@ src/khinsider_sync/
                 albums (quick scan, falls back to a full scan); read_albums() reads album pages
   parse.py      every page reader (browse list, latest list, album page, track page, platform list)
   extras.py     optional playlists (.m3u8) and folder.jpg per downloaded album, tracked in `extras`
+  covers.py     optional cover embedded into music files without one (mutagen); files.cover, Manifest.resized
   cleanup.py    Clean up: walk the download folder, judge files (gone / part / unticked), delete
   static/       index.html, app.css, app.js - no build step, no CDN (works offline on a LAN)
   core/         the sync engine from Rom Sync
@@ -128,7 +129,7 @@ tests/  conftest (app_factory + API helpers), mock_site, fixtures/ (real markup 
   CHANGELOG.md.
 
 ## Conventions
-- Dependencies: httpx[http2], selectolax, fastapi, uvicorn, curl_cffi (+ pytest/pyflakes). Ask before adding more.
+- Dependencies: httpx[http2], selectolax, fastapi, uvicorn, curl_cffi, mutagen (+ pytest/pyflakes). Ask before adding more.
   The app must keep working without curl_cffi (plain httpx, a warning in the log).
 - Log through `logging.getLogger("khinsider_sync")`. Never `print`.
 - Every user-visible change gets a test against `MockSite`. **MockSite copies the live markup**; when

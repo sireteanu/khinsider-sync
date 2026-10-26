@@ -32,7 +32,8 @@ DEFAULT_SETTINGS = {
     "track_names": "site",          # site ("1-01. Title.mp3" as khinsider names it) | numbered ("1-01 - Title.mp3")
     "art_folder": False,            # images in an "Art" folder inside the album's folder
     "playlists": False,             # write "<album>.m3u8" next to a downloaded album's music (extras.py)
-    "folder_art": False,            # copy a downloaded album's cover to folder.jpg / folder.png (extras.py)
+    "folder_art": False,
+    "embed_cover": False,           # put the album's cover into its music files that have none (covers.py)            # copy a downloaded album's cover to folder.jpg / folder.png (extras.py)
     "replace_formats": False,       # once a ticked album is downloaded in the formats now wanted, delete its
                                     # music files of formats no longer wanted (Engine._finish_upgrades)
     "impersonate": True,            # requests look like Chrome (needs curl_cffi)
@@ -221,6 +222,9 @@ class Catalog:
             CREATE INDEX IF NOT EXISTS changes_job ON changes(job, kind);
             CREATE TABLE IF NOT EXISTS extras (rel TEXT PRIMARY KEY, album TEXT, kind TEXT, sig TEXT);
         """)
+        cols = {r[1] for r in self.db.execute("PRAGMA table_info(files)")}
+        if "cover" not in cols:                  # 1.0.9: covers embedded into music files (covers.py)
+            self.db.execute("ALTER TABLE files ADD COLUMN cover TEXT")
         self.db.commit()
         self._index: Optional[list] = None       # [(slug, (platforms), type)] for the selection
         self._stats: Optional[dict] = None       # {album: {ext|"art": [n, bytes, synced, synced_bytes, failed]}}
@@ -551,6 +555,24 @@ class Catalog:
         with self.lock:
             self.db.execute("INSERT OR REPLACE INTO extras VALUES (?,?,?,?)", (rel, album, kind, sig))
 
+    def uncovered(self, slugs) -> list:
+        """[(url, rel, album, ext)] downloaded music files of these albums not handled by covers.py yet."""
+        words = ",".join("'%s'" % w for w in SYNCED_WORDS)
+        out = []
+        slugs = list(slugs)
+        with self.lock:
+            for i in range(0, len(slugs), 500):
+                chunk = slugs[i:i + 500]
+                out += self.db.execute(
+                    f"SELECT url, rel, album, ext FROM files WHERE kind!='art' AND cover IS NULL AND local IN ({words}) "
+                    f"AND album IN ({','.join('?' * len(chunk))}) ORDER BY album, pos", chunk).fetchall()
+        return out
+
+    def set_cover(self, url: str, result: str, size: Optional[int] = None) -> None:
+        with self.lock:
+            self.db.execute("UPDATE files SET cover=?, local_size=COALESCE(?, local_size) WHERE url=?",
+                            (result, size, url))
+
     def drop_extras(self, rels: Iterable[str]) -> None:
         with self.lock:
             self.db.executemany("DELETE FROM extras WHERE rel=?", [(r,) for r in rels])
@@ -570,8 +592,9 @@ class Catalog:
 
     def set_local(self, url: str, word: Optional[str], size: Optional[int], error: Optional[str]) -> None:
         with self.lock:
-            self.db.execute("UPDATE files SET local=?, local_size=COALESCE(?, local_size), synced=?, "
-                            "error=? WHERE url=?", (word, size, time.time(), error, url))
+            self.db.execute("UPDATE files SET local=?, local_size=COALESCE(?, local_size), synced=?, error=?, "
+                            "cover=CASE WHEN ? IN ('new','updated','resumed') THEN NULL ELSE cover END "
+                            "WHERE url=?", (word, size, time.time(), error, word, url))
         self._stats = None
         self.version += 1
 

@@ -24,8 +24,8 @@ from .core.sync import MANIFEST_NAME, FileInfo, Manifest, size_range, stamp_fold
 from .core.util import CHALLENGE_MESSAGE, fmt_bytes, is_challenge, parse_size, safe_segment
 
 from . import __version__, parse
-from .catalog import (ALBUM, PLATFORM, Catalog, album_plan, album_rank, album_wants, parse_format_setting,
-                      parse_formats)
+from .catalog import (ALBUM, PLATFORM, SYNCED_WORDS, Catalog, album_plan, album_rank, album_wants,
+                      parse_format_setting, parse_formats)
 from .core.constants import AUDIO_EXTENSIONS, BEST_ORDER
 from .scanner import Scanner
 
@@ -356,7 +356,7 @@ class Engine:
                 v = max(0.0, float(v or 0))
                 v = int(v) if v == int(v) else v
             if k in ("resume_interrupted", "album_art", "art_folder", "impersonate", "replace_formats",
-                     "playlists", "folder_art"):
+                     "playlists", "folder_art", "embed_cover"):
                 v = bool(v)
             if k == "track_names" and v not in ("site", "numbered"):
                 raise ValueError("track names must be site or numbered")
@@ -712,6 +712,7 @@ class Engine:
                 self.catalog.commit()
                 await self._finish_upgrades()
                 await self._write_extras(client)
+                await self._embed_covers(client, manifest)
                 await self._check_leftovers()
             best = self.gate.remembered_max()
             if best:
@@ -962,6 +963,83 @@ class Engine:
                          kinds.get("playlist", 0), kinds.get("folder_art", 0), len(removed))
         except Exception as e:
             log.warning("Could not write the playlists / folder images: %r", e)
+
+    async def _embed_covers(self, client, manifest) -> None:
+        """Put each ticked, downloaded album's cover into its music files that have none (covers.py).
+        Each file once; never fails a sync."""
+        from . import covers
+        s = self.catalog.settings()
+        if not s.get("embed_cover"):
+            return
+        if not covers.available():
+            log.warning("Covers can't be put into the music files: the mutagen package is missing "
+                        "(pip install mutagen)")
+            return
+        try:
+            selected = set(self.catalog.selected_albums(None, s.get("platform_types") or []))
+            albums = self.catalog.albums_by_slug(selected)
+            done = [a for a, d in albums.items()
+                    if d["read"] and self.catalog.album_totals(a, d["formats"], s)["downloaded"]]
+            todo = self.catalog.uncovered(done)
+            if not todo:
+                return
+            root = self.data_dir
+            with self.catalog.lock:
+                firsts = {a: (url, rel, local) for a, url, rel, local in self.catalog.db.execute(
+                    "SELECT album, url, rel, local FROM files WHERE kind='art' ORDER BY album, pos DESC")}
+            counts = collections.Counter()
+            self.job["phase"] = "putting covers into the music files"
+            by_album: dict = {}
+            for row in todo:
+                by_album.setdefault(row[2], []).append(row)
+            for slug, rows in by_album.items():
+                if self.stop_requested:
+                    break
+                data = None
+                first = firsts.get(slug)
+                if first and first[2] in SYNCED_WORDS:
+                    try:
+                        with open(os.path.join(root, *first[1].split("/")), "rb") as f:
+                            data = f.read()
+                    except OSError:
+                        data = None
+                if data is None and first and client is not None:
+                    try:
+                        r = await client.get(first[0])
+                        data = r.content if r.status_code == 200 else None
+                    except Exception:
+                        data = None
+                mime = covers.mime_of(data or b"")
+                if not first or not mime:
+                    for url, *_ in rows:
+                        self.catalog.set_cover(url, "skipped" if not first else None)
+                    counts["no cover" if not first else "cover not loaded"] += len(rows)
+                    continue
+
+                def tag_all(rows=rows, data=data, mime=mime) -> list:
+                    out = []
+                    for url, rel, _album, ext in rows:
+                        path = os.path.join(root, *rel.split("/"))
+                        try:
+                            res = covers.embed(path, ext, data, mime)
+                        except Exception as e:  # a file mutagen can't read stays as it was
+                            log.warning("could not put the cover into %s: %s", rel, e)
+                            res = "skipped"
+                        out.append((url, rel, res, os.path.getsize(path) if res == "added" else None))
+                    return out
+
+                for url, rel, res, size in await asyncio.to_thread(tag_all):
+                    self.catalog.set_cover(url, res, size)
+                    if size is not None:
+                        manifest.resized(rel, size)
+                    counts[res] += 1
+            manifest.commit()
+            self.catalog.commit()
+            self._sel_cache = None
+            log.info("Covers: put into %d files, %d already had one%s", counts["added"], counts["had"],
+                     "".join(f", {n} {k}" for k, n in counts.items() if k not in ("added", "had") and n))
+        except Exception as e:
+            log.warning("Could not put the covers into the music files: %r", e)
 
     async def read_album_now(self, slug: str) -> dict:
         """Read one album's page right away (opening an album in the page), outside the job queue."""

@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.9] - 2026-10-25
+
+### New
+- **Put the cover into each music file** (Settings): khinsider's cover for the album goes into its
+  MP3, FLAC, M4A and OGG/Opus files that have no picture yet. Pictures already inside are kept. Works
+  without syncing images, and each file is tagged once, keeping its date. Needs the mutagen package
+  (installed with this version; Windows: start.bat installs it).
+
 ## [1.0.8] - 2026-10-25
 
 ### Fixed

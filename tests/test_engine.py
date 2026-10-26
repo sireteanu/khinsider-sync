@@ -323,6 +323,57 @@ def test_a_png_cover_becomes_folder_png(site, app_factory):
     assert "PNG Cover OST/folder.png" in files and "PNG Cover OST/folder.jpg" not in files
 
 
+def pictures(path):
+    from mutagen.flac import FLAC
+    from mutagen.id3 import ID3
+    if str(path).endswith(".flac"):
+        return [p.data for p in FLAC(path).pictures]
+    return [f.data for f in ID3(path).getall("APIC")]
+
+
+def test_cover_embedded_into_mp3_files(site, app_factory):
+    c = app_factory(site, settings={"embed_cover": True})
+    st = first_sync(c)
+    album_dir = c.data / "Super Mario World"
+    cover = (album_dir / "Cover.jpg").read_bytes()
+    for name in ("01. Nintendo Logo.mp3", "02. Title Screen.mp3", "03. Overworld.mp3"):
+        assert pictures(album_dir / name) == [cover]
+    assert any("Covers: put into 3 files, 0 already had one" in m for m in log_lines(st))
+    t = time.localtime(os.stat(album_dir / "01. Nintendo Logo.mp3").st_mtime)
+    assert time.strftime("%Y-%m-%d %H:%M", t) == "2025-04-24 12:00", "the album's date stays"
+    # the new sizes are remembered: a check doesn't take tagged files for damaged ones
+    assert c.post("/api/check").status_code == 200
+    assert "all 4 downloaded files are there" in wait(c)["job"]["message"]
+    before = sum("Covers:" in m for m in log_lines(st))
+    site.reset_log()
+    st = sync(c)
+    assert sum("Covers:" in m for m in log_lines(st)) == before and not site.file_requests(), "each file once"
+
+
+def test_a_picture_already_in_the_file_is_kept(site, app_factory):
+    from mutagen.id3 import APIC, ID3
+    c = app_factory(site)
+    first_sync(c)
+    album_dir = c.data / "Super Mario World"
+    tags = ID3(album_dir / "01. Nintendo Logo.mp3")
+    tags.add(APIC(encoding=3, mime="image/jpeg", type=3, desc="theirs", data=b"\xff\xd8\xff theirs"))
+    tags.save()
+    c.post("/api/settings", json={"embed_cover": True})
+    st = sync(c)
+    assert pictures(album_dir / "01. Nintendo Logo.mp3") == [b"\xff\xd8\xff theirs"]
+    assert pictures(album_dir / "02. Title Screen.mp3") == [(album_dir / "Cover.jpg").read_bytes()]
+    assert any("Covers: put into 2 files, 1 already had one" in m for m in log_lines(st))
+
+
+def test_cover_embedded_into_flac_without_syncing_images(site, app_factory):
+    c = app_factory(site, settings={"embed_cover": True, "formats": "first:.flac"})
+    first_sync(c)
+    files = on_disk(c.data)
+    assert not any(f.endswith(".jpg") for f in files), "images still aren't synced"
+    pics = pictures(c.data / "Super Mario World" / "01. Nintendo Logo.flac")
+    assert len(pics) == 1 and pics[0][:3] == b"\xff\xd8\xff"
+
+
 def test_folder_images_never_replace_your_own_and_go_when_turned_off(site, app_factory):
     c = app_factory(site, settings={"folder_art": True, "playlists": True})
     os.makedirs(c.data / "Super Mario World")

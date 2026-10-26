@@ -50,6 +50,8 @@ to see just those.
 - **Playlist** and **folder.jpg**: a playlist and the album's cover (the picture khinsider shows for it,
   also when you don't sync images; a PNG cover is saved as folder.png) in each downloaded album's
   folder, for Plex, Jellyfin, Kodi and music players.
+- **Put the cover into each music file**: the same cover inside the MP3, FLAC, M4A and OGG files, for
+  players that only read tags. Files that already have a picture keep theirs.
 - **Folders**: one folder per album, or grouped by platform, type or year.
 - **A ticked platform brings in these album types**: e.g. tick only *Gamerip* so ticking SNES
   doesn't also bring in every arrangement and remix.

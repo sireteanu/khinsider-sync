@@ -344,8 +344,11 @@ class MockSite:
             size *= 3
         if ext in ("jpg", "png"):
             size = 8000 + extra
-        head = {"mp3": b"ID3\x04", "flac": b"fLaC", "ogg": b"OggS", "jpg": b"\xff\xd8\xff\xe0",
-                "png": b"\x89PNG"}.get(ext, b"")
+        # MP3: an empty ID3v2.4 tag; FLAC: a real STREAMINFO block - so tag readers (covers.py) can open them
+        streaminfo = (b"\x10\x00\x10\x00" + b"\x00" * 6
+                      + ((44100 << 44) | (1 << 41) | (15 << 36)).to_bytes(8, "big") + b"\x00" * 16)
+        head = {"mp3": b"ID3\x04\x00\x00\x00\x00\x00\x00", "flac": b"fLaC\x80\x00\x00\x22" + streaminfo,
+                "ogg": b"OggS", "jpg": b"\xff\xd8\xff\xe0", "png": b"\x89PNG"}.get(ext, b"")
         seed = hashlib.sha256(f"{slug}/{name}#{version}".encode()).digest()
         return head + (seed * (size // 32 + 1))[: size - len(head)]
 

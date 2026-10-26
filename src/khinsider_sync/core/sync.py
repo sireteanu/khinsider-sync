@@ -218,6 +218,13 @@ class Manifest:
             old.page_date, old.page_size = info.date, info.size
             self._save(old)
 
+    def resized(self, path: str, size: int) -> None:
+        """This app changed a saved file on purpose (its tags): remember its new size."""
+        rec = self.rows.get(path)
+        if rec is not None and rec.size != size:
+            rec.size = size
+            self._save(rec)
+
     def by_url(self) -> dict:
         """{url: path} of every saved file (to find files whose place in the folder changed)."""
         return {r.url: r.path for r in self.rows.values() if r.url}

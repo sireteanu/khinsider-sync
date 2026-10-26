@@ -56,7 +56,7 @@ modest, don't sync the whole site, and consider [donating](https://downloads.khi
 | Downloaded albums | The album list marks every album as **Downloaded** or **Partly downloaded** (with the date in its tooltip and window), the filter shows Downloaded / Partly downloaded / Not downloaded, and the top strip counts "12 of 13 albums downloaded". **Check files** in an album's window looks for files you deleted; **Check download folder** (☰ menu) does that for every downloaded album at once - disk only, no requests. The next sync downloads the missing files again. |
 | Upgrading | An album's window offers **Upgrade to FLAC** (or another format the album has that is better than what you downloaded: FLAC, WAV, APE, WV, M4A, OPUS, OGG, AAC, MP3). The album gets that format as its own formats and is ticked; once a sync has every new file, it deletes the album's files of the old format (images stay) and logs them in the Activity log as "Replaced by FLAC". Until then the old files stay and Clean up leaves them alone. **Cancel upgrade** puts the album's formats back. **Replace old formats** (Settings) does the same for every ticked album whenever the formats setting changes - switch to FLAC and the MP3s go once the FLACs are in. |
 | One album now | **Sync now** in an album's window syncs just that album (and ticks it). |
-| Playlists and covers | Optional: `<album>.m3u8` (track order, lengths, titles) and `folder.jpg` (khinsider's cover for the album: the first image on its page - the one its own lists show - copied from the downloaded images, or fetched on its own when images aren't synced; a PNG cover becomes `folder.png`) in each downloaded album's folder, for Plex, Jellyfin, Kodi and players. They move with the album, go when turned off, and Clean up lists them with an unticked album's music. A `folder.jpg` of your own is never replaced. |
+| Playlists and covers | Optional: `<album>.m3u8` (track order, lengths, titles) and `folder.jpg` (khinsider's cover for the album: the first image on its page - the one its own lists show - copied from the downloaded images, or fetched on its own when images aren't synced; a PNG cover becomes `folder.png`) in each downloaded album's folder, for Plex, Jellyfin, Kodi and players. They move with the album, go when turned off, and Clean up lists them with an unticked album's music. A `folder.jpg` of your own is never replaced. **Put the cover into each music file** (optional) adds the same cover to MP3, FLAC, M4A and OGG/Opus files that carry no picture yet - pictures already inside are kept. Each file is tagged once, on a copy that replaces it, keeping its date and permissions; the download record learns the new size, so checks don't take it for a damaged file. |
 | Dates | Each saved file gets the album's "Date Added" (12:00 local time); folders get the date of their newest file. |
 | Renamed albums | When khinsider moves an album to a new address, its tick, Saved as and folder follow it. |
 | Permissions | Downloaded files and new folders get mode **777** by default (setting). |
@@ -286,6 +286,7 @@ Stored in the catalog (`settings` table); changed in the Settings dialog or `POS
 | `art_folder` | `false` | Images in `<album>/Art/` |
 | `replace_formats` | `false` | Once a ticked album is downloaded in the formats now wanted, delete its music files of formats no longer wanted |
 | `playlists` | `false` | Write `<album folder>.m3u8` in each downloaded album's folder |
+| `embed_cover` | `false` | Put the album's cover into each downloaded music file that has no picture (MP3, FLAC, M4A, OGG/Opus; needs mutagen) |
 | `folder_art` | `false` | Save each downloaded album's cover (its first image) as `folder.jpg` / `folder.png`, also when images aren't synced |
 | `impersonate` | `true` | Look like Chrome (needs curl_cffi) |
 | `parallel` | `auto` | `auto` or a fixed number of parallel downloads |
@@ -376,6 +377,7 @@ src/khinsider_sync/
   scanner.py    scan_site() (platform list + browse pages), scan_latest() (home page), read_albums()
   parse.py      page readers: parse_browse, parse_latest, parse_album, parse_track, parse_platforms
   extras.py     playlists and folder images next to downloaded albums
+  covers.py     the cover embedded into music files (mutagen)
   cleanup.py    Clean up: walk the download folder, judge files, delete confirmed ones
   static/       index.html, app.css, app.js - no build step, no CDN
   core/         the sync engine from Rom Sync (download.py with the `resolve` hook, sync.py, limits.py ...)

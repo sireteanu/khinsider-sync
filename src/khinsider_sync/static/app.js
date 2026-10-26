@@ -963,6 +963,7 @@ $("#btn-settings").addEventListener("click", async () => {
   form.replace_formats.checked = !!s.replace_formats;
   form.playlists.checked = !!s.playlists;
   form.folder_art.checked = !!s.folder_art;
+  form.embed_cover.checked = !!s.embed_cover;
   form.track_names.value = s.track_names || "site";
   form.impersonate.checked = s.impersonate !== false;
   const box = $("#types-list");
@@ -1007,6 +1008,7 @@ $("#settings-save").addEventListener("click", async (e) => {
     replace_formats: form.replace_formats.checked,
     playlists: form.playlists.checked,
     folder_art: form.folder_art.checked,
+    embed_cover: form.embed_cover.checked,
     track_names: form.track_names.value,
     impersonate: form.impersonate.checked,
     platform_types: [...document.querySelectorAll("#types-list input:checked")].map((i) => i.value),
