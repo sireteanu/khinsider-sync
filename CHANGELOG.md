@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.0.10] - 2026-10-25
+
+### Improved
+- Check download folder shows a progress bar in the Activity panel: files looked at, time
+  remaining, and how many are missing so far.
+
+### Fixed
+- Counters of the last sync or scan stayed on screen after they should have been hidden (e.g. during
+  a check of the download folder).
+
 ## [1.0.9] - 2026-10-25
 
 ### New

@@ -201,6 +201,7 @@ class Engine:
         self.next_run: Optional[float] = None
         self.shutting_down = False
         self.leftovers: Optional[dict] = None   # Clean up summary from the last check
+        self.check_progress: Optional[dict] = None    # Check download folder: {total, done, missing}
         self._sel_cache = None
 
     # ------------------------------------------------------------------ where albums are saved
@@ -766,10 +767,10 @@ class Engine:
     async def _check_folder(self) -> dict:
         """Every downloaded file is looked for on disk; the ones deleted since are marked not
         downloaded, so their albums show it and the next sync gets them again."""
-        self.job["phase"] = "checking the download folder"
+        self.job["phase"] = "looking at every downloaded file"
         root = self.data_dir
         rows = self.catalog.saved_files()
-        self.job["message"] = f"{len(rows):,} downloaded files"
+        prog = self.check_progress = {"total": len(rows), "done": 0, "missing": 0, "started": time.time()}
 
         def look() -> list:
             gone = []
@@ -778,6 +779,8 @@ class Engine:
                     break
                 if not file_intact(root, rel, saved):
                     gone.append((url, rel, album))
+                    prog["missing"] += 1
+                prog["done"] += 1
             return gone
 
         gone = await asyncio.to_thread(look)
@@ -1167,6 +1170,12 @@ class Engine:
         }
         if self.scanner is not None:
             out["scan"] = self.scanner.progress()
+        if self.check_progress is not None and self.busy:
+            p = dict(self.check_progress)
+            spent = time.time() - p["started"]
+            rate = p["done"] / spent if spent > 1 and p["done"] else 0
+            p["eta"] = round((p["total"] - p["done"]) / rate) if rate else None
+            out["check"] = p
         if self.downloader is not None and self.job and self.job.get("phase") in ("downloading", "done", "stopped"):
             dl, g = self.downloader, self.gate
             st = self.sync_stats

@@ -159,6 +159,32 @@ def test_check_download_folder_finds_deleted_files_of_every_album(site, app_fact
     assert "all 9 downloaded files are there" in wait(c)["job"]["message"]
 
 
+def test_check_download_folder_reports_its_progress(site, app_factory, monkeypatch):
+    import khinsider_sync.engine as engine_mod
+    c = app_factory(site)
+    first_sync(c)
+    real = engine_mod.file_intact
+
+    def slow(root, rel, size):
+        time.sleep(0.3)
+        return real(root, rel, size)
+    monkeypatch.setattr(engine_mod, "file_intact", slow)
+    os.remove(c.data / "Super Mario World" / "01. Nintendo Logo.mp3")
+    assert c.post("/api/check").status_code == 200
+    seen = []
+    for _ in range(60):
+        st = c.get("/api/status").json()
+        if not st["busy"]:
+            break
+        if st.get("check"):
+            seen.append(st["check"])
+        time.sleep(0.1)
+    assert seen and seen[0]["total"] == 4
+    assert any(0 < p["done"] < 4 for p in seen), "the count moves while it runs"
+    assert seen[-1]["missing"] >= 1 and "eta" in seen[-1]
+    assert "check" not in c.get("/api/status").json(), "gone once it has finished"
+
+
 def test_upgrading_an_album_replaces_its_old_format(site, app_factory):
     c = app_factory(site)
     first_sync(c)

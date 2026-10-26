@@ -617,6 +617,21 @@ let pollTimer;
 let wasBusy = false;
 let lastListRefresh = 0;
 
+/* Check download folder: how many of the downloaded files were looked at */
+function renderCheck(c) {
+  const box = $("#check-box");
+  box.hidden = !c;
+  if (!c) return;
+  const pct = c.total ? Math.min(100, (100 * c.done) / c.total) : 100;
+  $("#check-count").textContent = `${num(c.done)} of ${nFiles(c.total)}`;
+  $("#check-time").textContent = c.done >= c.total ? "Finishing…" : c.eta != null ? duration(c.eta) : "working it out…";
+  $("#check-bar").style.width = pct.toFixed(1) + "%";
+  $("#check-meter").setAttribute("aria-valuenow", Math.round(pct));
+  $("#check-sub").textContent = c.missing
+    ? `${num(c.missing)} missing or cut short so far - the next sync downloads ${c.missing === 1 ? "it" : "them"} again`
+    : `${Math.floor(pct)}% - nothing missing so far`;
+}
+
 function setStats(el, pairs) {
   el.hidden = false;
   el.innerHTML = "";
@@ -704,6 +719,7 @@ function renderStatus(st) {
     setStats(sc, pairs);
   } else sc.hidden = true;
 
+  renderCheck(busy ? st.check : null);
   const sy = $("#sync-stats");
   renderDownloads(st.sync, syncing);
   if (st.sync) {

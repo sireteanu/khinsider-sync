@@ -147,6 +147,12 @@
         <div class="bar thin" role="img" aria-label="Progress of this sync"><div class="seg synced" id="eta-bar"></div></div>
         <div id="eta-sub" class="muted small"></div>
       </div>
+      <div id="check-box" class="eta" hidden>
+        <div class="eta-head"><span class="muted small">Checking the download folder</span><span id="check-count" class="small"></span></div>
+        <div class="eta-main"><span class="muted small">Time remaining</span><b id="check-time">-</b></div>
+        <div class="bar thin" role="progressbar" aria-label="Files checked" aria-valuemin="0" aria-valuemax="100" id="check-meter"><div class="seg synced" id="check-bar"></div></div>
+        <div id="check-sub" class="muted small"></div>
+      </div>
       <div id="scan-stats" class="stats" hidden></div>
       <div id="sync-stats" class="stats" hidden></div>
       <p id="sync-paused" class="error small" hidden></p>

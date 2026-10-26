@@ -248,7 +248,8 @@ doesn't change albums). For every file of the other ticked albums (formats as ab
   scheduled sync, check the download folder" (`check_folder_days`) set, a check of the download folder
   runs first when the last one is that old.
 - **Check download folder** compares every downloaded file with the size it was saved with: missing or
-  cut-short files are marked not downloaded (a cut-short one resumes at the next sync).
+  cut-short files are marked not downloaded (a cut-short one resumes at the next sync). The Activity
+  panel shows a progress bar while it runs: files looked at, time remaining, missing so far.
 
 ### Clean up
 
@@ -342,7 +343,7 @@ All JSON; the page uses nothing else.
 
 | Method & path | Purpose |
 |---|---|
-| `GET /api/status?log_since=N` | Version, busy, job, catalog counts, selection totals (`albums`, `unread`, `files`, `bytes`, `synced`, `synced_bytes`), scan / album-page progress, sync progress (incl. `bytes_left`, `eta`, `active`), `leftovers`, next run, new log lines |
+| `GET /api/status?log_since=N` | Version, busy, job, catalog counts, selection totals (`albums`, `unread`, `files`, `bytes`, `synced`, `synced_bytes`), scan / album-page progress, sync progress (incl. `bytes_left`, `eta`, `active`), while the download folder is checked `check: {total, done, missing, eta}`, `leftovers`, next run, new log lines |
 | `GET /api/platforms?type=` | `{platforms: [{slug, name, albums, state}], types: [[type, n]], no_platform, total, platform_types}`; with `type` (one or more, comma separated; `Other` = no type), `albums`, `no_platform` and `total` count only albums of those types (`types` always counts every type) |
 | `GET /api/albums?platform=&q=&type=&show=&sort=&dir=&offset=&limit=` | Albums (`platform` `-` = without platform; `type` as for platforms; `show` `all`/`ticked`/`downloaded`/`partly`/`notdownloaded`/`failed`/`unread`; `sort` `name`/`year`/`added`/`new`/`size`/`synced`) -> `{total, offset, albums}`; the filtered, sorted view is kept between requests (until the catalog, ticks or format settings change), so the page asks for one slice at a time while scrolling; sorted by name, also `letters: {"#": 0, "A": 412, ...}` - where each first letter starts in the whole view (`#` = digits and symbols) |
 | `GET /api/album?slug=` | One album, where it is saved (`dir`, `place`), its files with `wanted` and sync state, `upgrade: {have, better, pending}` (downloaded audio formats, better ones the album has, a waiting upgrade) |
