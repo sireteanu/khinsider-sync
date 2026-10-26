@@ -453,6 +453,54 @@ def test_tags_for_flac_and_tracks_without_numbers(site, app_factory):
     assert str(t["TRCK"]) == "2/2" and str(t["TIT2"]) == "Yesterday - Kan (Reives) Gao"
 
 
+def test_covers_and_tags_also_for_albums_with_a_failed_file(site, app_factory):
+    """One broken file (here a scan image that answers 404) must not keep the rest of the album
+    without its folder.jpg, embedded cover and tags."""
+    site.broken_images.add("Alternate Cover.png")
+    c = app_factory(site, settings={"folder_art": True, "embed_cover": True, "write_tags": True, "playlists": True})
+    st = first_sync(c, "a:persona-5")
+    assert st["sync"]["failed"] == 1
+    d = c.data / "PERSONA5 ORIGINAL SOUNDTRACK"
+    assert (d / "folder.jpg").exists()
+    assert (d / "PERSONA5 ORIGINAL SOUNDTRACK.m3u8").exists()
+    assert pictures(d / "1-01. Wake Up, Get Up, Get Out There.mp3") == [(d / "Cover.jpg").read_bytes()]
+
+
+def test_covers_and_tags_also_after_a_paused_sync(site, app_factory):
+    c = app_factory(site, settings={"parallel": "1", "album_art": False, "folder_art": True, "embed_cover": True})
+    scan(c)
+    select(c, "p:windows")
+    site.daily_limit = 2                      # khinsider's download limit: the sync pauses
+    st = sync(c)
+    assert st["sync"]["paused"] and st["sync"]["failed"] == 0
+    got = [f for f in on_disk(c.data) if f.endswith(".mp3")]
+    assert len(got) == 2, "two tracks came down before the pause"
+    for f in got:
+        assert pictures(c.data / f), "what arrived has its cover"
+        assert (c.data / f).parent.joinpath("folder.jpg").exists()
+
+
+def test_a_deleted_album_gets_its_folder_image_back(site, app_factory):
+    import shutil
+    c = app_factory(site, settings={"folder_art": True, "album_art": False, "playlists": True})
+    first_sync(c)
+    d = c.data / "Super Mario World"
+    assert (d / "folder.jpg").exists()
+    shutil.rmtree(d)                          # the album's folder deleted by hand
+    assert c.post("/api/check").status_code == 200
+    wait(c)
+    sync(c)
+    assert (d / "folder.jpg").exists() and (d / "Super Mario World.m3u8").exists()
+    # only the folder image deleted: a sync leaves downloaded albums alone, a check finds it
+    os.remove(d / "folder.jpg")
+    sync(c)
+    assert not (d / "folder.jpg").exists()
+    r = c.post("/api/album/check", json={"slug": SMW}).json()
+    assert r["missing"] == ["Super Mario World/folder.jpg"]
+    sync(c)
+    assert (d / "folder.jpg").exists()
+
+
 def test_folder_images_never_replace_your_own_and_go_when_turned_off(site, app_factory):
     c = app_factory(site, settings={"folder_art": True, "playlists": True})
     os.makedirs(c.data / "Super Mario World")

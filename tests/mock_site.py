@@ -36,6 +36,7 @@ Attributes you can change while a test runs:
   down_after  set `down` to 522 once this many downloads have completed (None = never)
   challenge   True: every page (not the files) answers Cloudflare's browser check - 403 with
               cf-mitigated: challenge and "Just a moment..." (what a data-center address gets)
+  broken_images  image names whose files answer 404 although the album page lists them
   robots_extra  more robots.txt lines (robots.txt is sent as text/html, like the live site)
 Methods: modify(slug, file, grow) replaces a file; remove(slug) takes an album off the site;
 add_album(slug, name, **fields) puts a new album up (added today unless `added` is given);
@@ -170,6 +171,7 @@ class MockSite:
         self.slow_all = False
         self.challenge = False             # pages answer Cloudflare's browser check (403, cf-mitigated)
         self.robots_extra = ""             # more robots.txt lines
+        self.broken_images: set = set()    # image names that answer 404 (listed on the page, file gone)
         self.requests: list = []           # (path, headers dict)
         self._lock = threading.Lock()
         self._count = 0
@@ -248,7 +250,7 @@ class MockSite:
                 if len(parts) == 2:                                    # an album image
                     slug, name = parts
                     a = site.albums.get(slug)
-                    if not a or name not in a["images"]:
+                    if not a or name not in a["images"] or name in site.broken_images:
                         return self._send(404, "")
                     self._counted = True                               # images aren't counted
                     return self._serve(slug, name)

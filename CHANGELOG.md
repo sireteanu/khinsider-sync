@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.0.13] - 2026-10-25
+
+### Fixed
+- A folder.jpg (or playlist) that was deleted - e.g. with the album's folder - never came back: the
+  app trusted its record of having written it. Now an album that gets files again gets them back, and
+  Check download folder / Check files find missing ones for the next sync.
+- folder.jpg, the embedded cover and tags were skipped for an album when any of its files failed
+  (e.g. a broken scan image on khinsider) and after a paused sync. Now every downloaded file gets them.
+
 ## [1.0.12] - 2026-10-25
 
 ### New

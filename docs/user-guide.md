@@ -79,7 +79,8 @@ through its files again. The exception: when khinsider **replaces an album with 
 the album is marked **New version** and the next sync downloads it again. If you deleted some of
 its files by hand, open the album and click **Check files**: the next sync gets the missing ones.
 To check every album at once, use **Check download folder** in the ☰ menu (it only looks at your
-disk; it doesn't ask khinsider anything). It also notices files that were cut short. The Activity
+disk; it doesn't ask khinsider anything). It also notices files that were cut short, and missing playlists or folder.jpg files (the next
+sync writes them again). The Activity
 panel shows how far it has got and how long it will take.
 
 **Better quality later**: if you downloaded an album as MP3 and khinsider also has it as FLAC, its

@@ -780,14 +780,17 @@ class Engine:
                 n = await asyncio.to_thread(stamp_folders, list(dl.touched_dirs), data_dir)
                 if n:
                     log.info("Dated %d folders to their newest file", n)
-            if not self.stop_requested and not dl.paused:
+            if not self.stop_requested:
                 manifest.commit()
                 self.catalog.commit()
-                await self._finish_upgrades()
+                if not dl.paused:
+                    await self._finish_upgrades()
+                # also after a pause (download limit, browser check): what did arrive gets its extras
                 finished = self._finished_albums()      # worked out once for the steps below
-                await self._write_extras(client, finished)
+                await self._write_extras(client, finished, recheck={a for a in got if a})
                 await self._tag_files(client, manifest, finished)
-                await self._check_leftovers()
+                if not dl.paused:
+                    await self._check_leftovers()
             best = self.gate.remembered_max()
             if best:
                 manifest.set_meta(key, best)
@@ -833,6 +836,12 @@ class Engine:
             raise ValueError("no such album")
         root = self.data_dir
         gone = self.catalog.forget_missing(slug, lambda rel, size: file_intact(root, rel, size))
+        from . import extras
+        made = {r: v for r, v in self.catalog.extras().items() if v[0] == slug}
+        lost = extras.missing(root, made, made, {slug})
+        if lost:
+            self.catalog.drop_extras(lost)
+            gone = gone + lost
         self._sel_cache = None
         if gone:
             log.info("%d files of %s are missing or cut short in the download folder - the next sync gets them again",
@@ -861,6 +870,13 @@ class Engine:
         gone = await asyncio.to_thread(look)
         if not self.stop_requested:
             self.catalog.save_settings({"last_folder_check": time.time()})
+            # playlists and folder images the app wrote: written again by the next sync when gone
+            from . import extras
+            made = self.catalog.extras()
+            lost = await asyncio.to_thread(extras.missing, root, made, made, {a for a, _k, _s in made.values()})
+            if lost:
+                self.catalog.drop_extras(lost)
+                log.info("%d playlists / folder images are missing - the next sync writes them again", len(lost))
         if gone:
             self.catalog.forget_local(u for u, _, _ in gone)
         albums = sorted({a for _, _, a in gone})
@@ -1013,8 +1029,9 @@ class Engine:
         self._sel_cache = None
 
     def _finished_albums(self) -> tuple:
-        """(settings, ticked albums, ticked albums whose wanted files are all downloaded) - for the
-        steps at the end of a sync, worked out once instead of by each of them."""
+        """(settings, ticked albums, ticked albums with downloaded files) - for the steps at the end of
+        a sync, worked out once instead of by each of them. Not only complete albums: one file that
+        failed (a broken scan on khinsider) mustn't keep the rest from its cover, tags and folder.jpg."""
         s = self.catalog.settings()
         if not (s.get("playlists") or s.get("folder_art") or s.get("embed_cover") or s.get("write_tags")
                 or self.catalog.extras()):
@@ -1022,10 +1039,10 @@ class Engine:
         selected = set(self.catalog.selected_albums(None, s.get("platform_types") or []))
         albums = self.catalog.albums_by_slug(selected)
         done = [a for a, d in albums.items()
-                if d["read"] and self.catalog.album_totals(a, d["formats"], s)["downloaded"]]
+                if d["read"] and self.catalog.album_totals(a, d["formats"], s)["synced"]]
         return s, selected, done
 
-    async def _write_extras(self, client=None, finished=None) -> None:
+    async def _write_extras(self, client=None, finished=None, recheck=frozenset()) -> None:
         """Playlists and folder images of the ticked, downloaded albums (extras.py). Never fails a sync."""
         from . import extras
         from .cleanup import remove_empty_dirs
@@ -1036,6 +1053,13 @@ class Engine:
                 return
             want = extras.plan(self, s, done)
             mode = int(parse_mode(s.get("file_mode", "")), 8) if parse_mode(s.get("file_mode", "")) else None
+            # albums that got files this sync: their playlist / folder image is looked for on disk too
+            # (written before, then deleted with the album's files?) - the others aren't touched
+            gone = await asyncio.to_thread(extras.missing, self.data_dir, have, want, set(recheck))
+            for rel in gone:
+                have.pop(rel, None)
+            if gone:
+                self.catalog.drop_extras(gone)
             fetched = await extras.fetch_covers(client, want, have) if client is not None else {}
             written, removed, dirs = await asyncio.to_thread(extras.apply, self.data_dir, want, have, selected, mode,
                                                              fetched)

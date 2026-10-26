@@ -127,6 +127,16 @@ def plan(engine, s: dict, slugs) -> dict:
     return want
 
 
+def missing(root: str, have: dict, want: dict, albums: set) -> list:
+    """Recorded playlists / folder images of these albums that aren't on disk any more (so they are
+    written again). Only these albums are looked at - one lookup each."""
+    out = []
+    for rel, (album, _kind, _sig) in have.items():
+        if album in albums and rel in want and not os.path.isfile(fs_path(os.path.join(root, *rel.split("/")))):
+            out.append(rel)
+    return out
+
+
 async def fetch_covers(client, want: dict, have: dict) -> dict:
     """Download the covers that aren't synced as images ("fetch") and aren't written yet -> {rel: bytes}.
     Anything that isn't a JPEG/PNG image (an error page, a challenge) is skipped and tried next time."""
