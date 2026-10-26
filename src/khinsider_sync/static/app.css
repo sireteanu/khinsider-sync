@@ -334,6 +334,18 @@ table.files td.n { white-space: nowrap; text-align: right; }
 .acols .sort.desc::after { content: "\25BC"; font-size: 9px; }
 .alist { height: calc(100vh - 340px); min-height: 300px; overflow: auto; position: relative; }
 .vspace { position: relative; }
+.alist-wrap { display: flex; align-items: stretch; }
+.alist-wrap .alist { flex: 1; min-width: 0; }
+.az { display: flex; flex-direction: column; width: 24px; padding: 4px 0; border-left: 1px solid var(--line); }
+.az button {
+  flex: 1; min-height: 0; border: 0; background: none; padding: 0; cursor: pointer; color: var(--ink-2);
+  font: 600 10.5px/1 var(--font); border-radius: 3px;
+}
+.az button:hover:not(:disabled) { color: var(--ink); background: var(--grape-soft); }
+.az button.cur { color: var(--grape-ink); background: var(--grape-soft); }
+.az button.none { opacity: .3; }
+.az button:disabled { cursor: default; }
+.az button:focus-visible { outline: 2px solid var(--grape-ink); outline-offset: -2px; }
 .arow { padding: 4px 12px; }
 .vspace .arow { position: absolute; left: 0; right: 0; height: 46px; box-sizing: border-box; overflow: hidden; }  /* ROW in app.js */
 .arow.blank .aname .n { color: var(--ink-3, var(--ink-2)); }

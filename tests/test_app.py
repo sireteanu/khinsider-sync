@@ -44,6 +44,18 @@ def test_platform_counts_follow_the_type_filter(site, app_factory):
     assert c.get("/api/platforms").json()["total"] == 7
 
 
+def test_album_list_says_where_each_letter_starts(site, app_factory):
+    c = app_factory(site)
+    scan(c)
+    d = c.get("/api/albums", params={"limit": 2}).json()
+    assert d["letters"] == {"#": 0, "A": 1, "B": 2, "P": 3, "S": 4}, "for the whole view, not just this slice"
+    names = [a["name"] for a in c.get("/api/albums").json()["albums"]]
+    assert names[4] == "Sonic the Hedgehog"
+    d = c.get("/api/albums", params={"platform": "nintendo-snes"}).json()
+    assert d["letters"] == {"S": 0}
+    assert "letters" not in c.get("/api/albums", params={"sort": "year"}).json()
+
+
 def test_several_album_types_at_once(site, app_factory):
     c = app_factory(site)
     scan(c)

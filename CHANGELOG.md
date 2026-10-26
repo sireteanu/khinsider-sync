@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.7] - 2026-10-25
+
+### New
+- An A–Z strip beside the album list jumps to the first album of a letter (`#` for digits and
+  symbols). Letters without albums in the current view are dimmed; the letter you're at is marked.
+  With another sort, a click sorts by name first.
+
 ## [1.0.6] - 2026-10-24
 
 ### Fixed

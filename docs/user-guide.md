@@ -21,7 +21,8 @@ is downloaded. Afterwards you see every album, with the platforms on the left.
 - Click a platform on the left to see its albums. Use **Every type** to show only gamerips,
   soundtracks, arrangements … - tick as many types as you like. The platform counts on the left then
   count only those types.
-- The list holds every album of what you picked: just scroll, there is no "Show more".
+- The list holds every album of what you picked: just scroll, there is no "Show more". The **A–Z**
+  strip at its right edge jumps to a letter (`#` for names starting with a digit or symbol).
 - Tick the box in front of an album to sync it.
 - Tick the box in front of a **platform** (or "Sync every album of …" above its list) to sync every
   album of that platform - also the ones khinsider adds later. Untick single albums to leave them

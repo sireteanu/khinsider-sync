@@ -120,7 +120,10 @@
         <button class="sort c-meter" data-sort="synced" title="Sort by how much is synced">Synced</button>
         <span></span>
       </div>
-      <div id="alist" class="alist" role="list"></div>
+      <div class="alist-wrap">
+        <div id="alist" class="alist" role="list"></div>
+        <nav id="az" class="az" aria-label="Jump to a letter"></nav>
+      </div>
       <div id="empty" class="empty" hidden>
         <h2>Start with a scan</h2>
         <p>The catalog is empty. A scan reads khinsider's album lists (about 230 pages for 100,000+ albums),

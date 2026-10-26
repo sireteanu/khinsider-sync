@@ -166,7 +166,8 @@ const PAGE = 200;                 // albums per request
 const ROW = 46;                   // height of a row (px), fixed in app.css (.arow)
 const EXTRA = 12;                 // rows kept above and below the visible ones
 let total = 0, listEpoch = 0;
-let slices = new Map();           // slice number -> albums (or a promise while loading)
+let slices = new Map();
+let letters = null;               // {"#": 0, "A": 412, ...}: where each letter starts (name sort only)           // slice number -> albums (or a promise while loading)
 const rows = new Map();           // index -> row element on screen
 const space = document.createElement("div");
 space.className = "vspace";
@@ -277,6 +278,7 @@ function render() {
     renderQueued = false;
     const first = Math.max(0, Math.floor(alist.scrollTop / ROW) - EXTRA);
     const last = Math.min(total - 1, Math.ceil((alist.scrollTop + alist.clientHeight) / ROW) + EXTRA);
+    azCurrent();
     for (const [i, el] of rows) if (i < first || i > last) { el.remove(); rows.delete(i); }
     for (let i = first; i <= last; i++) {
       let el = rows.get(i);
@@ -293,6 +295,47 @@ function render() {
   });
 }
 alist.addEventListener("scroll", render, { passive: true });
+
+/* the A-Z strip beside the list: jump to the first album of a letter (sorts by name first if needed) */
+const AZ = ["#", ..."ABCDEFGHIJKLMNOPQRSTUVWXYZ"];
+for (const L of AZ) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.textContent = L;
+  b.dataset.l = L;
+  b.title = L === "#" ? "Jump to names starting with a digit or symbol" : `Jump to ${L}`;
+  b.addEventListener("click", () => jumpTo(L));
+  $("#az").append(b);
+}
+function azState() {
+  const byName = view.sort === "name";
+  for (const b of $("#az").children) {
+    const has = !byName || (letters && letters[b.dataset.l] != null);
+    b.classList.toggle("none", !has);
+    b.disabled = byName && !has;
+  }
+  $("#az").title = byName ? "" : "Sorts the list by name, then jumps";
+  azCurrent();
+}
+function azCurrent() {
+  let cur = null;
+  if (letters && view.sort === "name") {
+    const top = Math.floor(alist.scrollTop / ROW);
+    let best = -1;
+    for (const [L, i] of Object.entries(letters)) if (i <= top && i > best) { best = i; cur = L; }
+  }
+  for (const b of $("#az").children) b.classList.toggle("cur", b.dataset.l === cur);
+}
+async function jumpTo(L) {
+  if (view.sort !== "name") {
+    view = { ...view, sort: "name", dir: 1 };
+    saveView();
+    await reload();
+  }
+  if (!letters || letters[L] == null) return;
+  alist.scrollTop = letters[L] * ROW;
+  render();
+}
 window.addEventListener("resize", render);
 
 async function reload() {
@@ -303,6 +346,8 @@ async function reload() {
   try { d = await query(0); } catch (e) { $("#list-count").textContent = "Could not load: " + e.message; return; }
   if (epoch !== listEpoch) return;
   slices = new Map([[0, d.albums]]);
+  letters = d.letters || null;
+  azState();
   for (const el of rows.values()) el.remove();
   rows.clear();
   alist.innerHTML = "";
@@ -324,6 +369,8 @@ async function refreshList() {
     const d = await query(0, 1);
     if (epoch !== listEpoch || selPending) return;
     slices = fresh;
+    letters = d.letters || null;
+    azState();
     setTotal(d.total);
   } catch (e) { return; }
   for (const el of rows.values()) el._a = null;      // refill every row from the fresh data

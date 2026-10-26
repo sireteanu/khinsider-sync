@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import __version__
 from .catalog import ALBUM, PLATFORM, album_wants, split_platforms
+from .parse import letter_of
 from .engine import Engine
 
 log = logging.getLogger("khinsider_sync")
@@ -225,7 +226,25 @@ def create_app(engine_factory, password: Optional[str] = None, on_restart=None, 
         selected = set(e.catalog.selected_albums(rules, s.get("platform_types") or []))
         names = e.catalog.platform_names()
         page = [album_json(e, a, rules, selected, s, names) for a in items[offset:offset + limit]]
-        return {"total": len(items), "offset": offset, "albums": page}
+        out = {"total": len(items), "offset": offset, "albums": page}
+        if sort == "name":
+            out["letters"] = letter_index(key, items)
+        return out
+
+    # where each letter starts in a view sorted by name ("#" = digits and symbols), for the A-Z strip
+    jumps: "collections.OrderedDict[tuple, dict]" = collections.OrderedDict()
+
+    def letter_index(key: tuple, items: list) -> dict:
+        hit = jumps.get(key)
+        if hit is None:
+            hit = {}
+            for i, a in enumerate(items):
+                c = letter_of(a["name"])
+                hit.setdefault("#" if c == "0-9" else c, i)
+            jumps[key] = hit
+            while len(jumps) > 8:
+                jumps.popitem(last=False)
+        return hit
 
     @app.get("/api/album")
     async def album(slug: str):
