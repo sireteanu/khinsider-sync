@@ -9,6 +9,8 @@
 The URL decides the format:
   Discord webhook (discord.com/api/webhooks/...)  {"content": "**title**\\nmessage"}
   ntfy (a host with "ntfy" in its name)           the message as text, the title in a Title header
+  Pushbullet: pbul://<access token>               a note to all your devices (Pushbullet's API,
+                                                  the token in its Access-Token header)
   anything else (Gotify /message?token=..., Home Assistant /api/webhook/..., Apprise API ...)
                                                   JSON {"title", "message", "body"}
 Unraid's own notifications live on the host, out of reach of a container: point this at ntfy,
@@ -24,9 +26,17 @@ import httpx
 log = logging.getLogger("khinsider_sync")
 
 EVENTS = ("downloads", "new_albums", "problems")
+PUSHBULLET_API = "https://api.pushbullet.com/v2/pushes"
+
+
+def valid(url: str) -> bool:
+    url = (url or "").strip().lower()
+    return url.startswith(("http://", "https://")) or (url.startswith("pbul://") and len(url) > 7)
 
 
 def kind_of(url: str) -> str:
+    if url.strip().lower().startswith("pbul://"):
+        return "pushbullet"
     host = (urlsplit(url).hostname or "").lower()
     path = urlsplit(url).path
     if host.endswith(("discord.com", "discordapp.com")) and "/api/webhooks/" in path:
@@ -39,11 +49,17 @@ def kind_of(url: str) -> str:
 async def send(url: str, title: str, message: str, timeout: float = 10.0) -> None:
     """Raises httpx errors / ValueError (for a test from the page); send_quietly() for jobs."""
     url = (url or "").strip()
-    if not url.lower().startswith(("http://", "https://")):
-        raise ValueError("the notification address must start with http:// or https://")
+    if not valid(url):
+        raise ValueError("the notification address must start with http:// or https:// (or pbul:// for Pushbullet)")
     kind = kind_of(url)
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-        if kind == "discord":
+        if kind == "pushbullet":
+            token = url[len("pbul://"):].strip("/")
+            r = await client.post(PUSHBULLET_API, headers={"Access-Token": token},
+                                  json={"type": "note", "title": title, "body": message})
+            if r.status_code == 401:
+                raise ValueError("Pushbullet doesn't accept that access token")
+        elif kind == "discord":
             r = await client.post(url, json={"content": f"**{title}**\n{message}"[:1900]})
         elif kind == "ntfy":
             r = await client.post(url, content=message.encode("utf-8"),

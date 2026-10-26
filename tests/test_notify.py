@@ -46,6 +46,7 @@ def test_kind_of_address():
     assert notify.kind_of("http://ntfy.home.lan/music") == "ntfy"
     assert notify.kind_of("https://gotify.example/message?token=x") == "json"
     assert notify.kind_of("http://homeassistant.local:8123/api/webhook/khinsider") == "json"
+    assert notify.kind_of("pbul://o.AbC123") == "pushbullet"
 
 
 def test_sync_sends_what_it_downloaded(site, app_factory, hook):
@@ -94,3 +95,14 @@ def test_test_button_and_bad_addresses(site, app_factory, hook):
     assert c.post("/api/settings", json={"notify_url": "nope"}).status_code == 400
     r = c.post("/api/settings", json={"notify_on": ["downloads", "bogus"]}).json()
     assert r["settings"]["notify_on"] == ["downloads"]
+
+
+def test_pushbullet(site, app_factory, hook, monkeypatch):
+    monkeypatch.setattr(notify, "PUSHBULLET_API", hook.url)
+    c = app_factory(site)
+    assert c.post("/api/settings", json={"notify_url": "pbul://o.AbC123"}).status_code == 200
+    assert c.post("/api/notify/test", json={"url": "pbul://o.AbC123"}).json() == {"ok": True}
+    msgs = messages(hook)
+    assert msgs[0] == {"type": "note", "title": "Khinsider Sync", "body": "Test notification - notifications work."}
+    assert hook.got[0][1]["Access-Token"] == "o.AbC123"
+    assert c.post("/api/settings", json={"notify_url": "pbul://"}).status_code == 400

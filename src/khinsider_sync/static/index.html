@@ -284,8 +284,8 @@
       </select>
       <small>Looks at every downloaded file, which wakes the disks it is on (on Unraid, the array). <b>Check download folder</b> in the menu does it whenever you like.</small></label>
     <fieldset class="field notify-box"><legend>Notifications</legend>
-      <span class="unit"><input name="notify_url" type="url" spellcheck="false" autocomplete="off" placeholder="https://ntfy.sh/your-topic"><button id="notify-test" class="btn small" type="button">Send a test</button></span>
-      <small>An ntfy topic, a Gotify <i>/message?token=…</i> address, a Discord webhook or a Home Assistant webhook. Empty = no notifications.
+      <span class="unit"><input name="notify_url" type="text" spellcheck="false" autocomplete="off" placeholder="https://ntfy.sh/your-topic"><button id="notify-test" class="btn small" type="button">Send a test</button></span>
+      <small>An ntfy topic, a Gotify <i>/message?token=…</i> address, a Discord webhook, a Home Assistant webhook, or <i>pbul://</i> and your Pushbullet access token. Empty = no notifications.
         (Unraid's own notifications can't be reached from inside the container.) <span id="notify-result"></span></small>
       <div class="types-list">
         <label class="check"><input type="checkbox" name="notify_downloads"> Downloads finished (which albums)</label>

@@ -104,7 +104,8 @@ file you downloaded, which wakes the disks (on Unraid, the array). Pick once a d
 you want it.
 
 **Notifications**: in Settings, paste an ntfy topic, a Gotify, Discord or Home Assistant webhook
-address and click **Send a test**. You hear when downloads finish, when new albums arrive for your
+address - or for Pushbullet `pbul://` followed by your access token (pushbullet.com → Settings →
+Access Tokens) - and click **Send a test**. You hear when downloads finish, when new albums arrive for your
 ticked platforms, and when something needs a look.
 
 ## 8. Clean up

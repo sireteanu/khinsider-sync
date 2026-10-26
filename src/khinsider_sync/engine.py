@@ -363,8 +363,10 @@ class Engine:
                 v = bool(v)
             if k == "notify_url":
                 v = str(v or "").strip()
-                if v and not v.lower().startswith(("http://", "https://")):
-                    raise ValueError("the notification address must start with http:// or https://")
+                from .notify import valid
+                if v and not valid(v):
+                    raise ValueError("the notification address must start with http:// or https:// "
+                                     "(or pbul:// for Pushbullet)")
             if k == "notify_on":
                 from .notify import EVENTS
                 v = [e for e in EVENTS if e in (v or [])]

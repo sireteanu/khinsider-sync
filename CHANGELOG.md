@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.0.12] - 2026-10-25
+
+### New
+- Pushbullet notifications: use `pbul://` followed by your access token as the notification address.
+
 ## [1.0.11] - 2026-10-25
 
 ### New
