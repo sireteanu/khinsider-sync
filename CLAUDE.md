@@ -123,8 +123,10 @@ tests/  conftest (app_factory + API helpers), mock_site, fixtures/ (real markup 
 10. Politeness: page reads 4 at a time with pacing (`Limiter`) and at most `pages_per_minute` for the
    whole job (`pacing.PageRate`, also the Resolver's track pages); downloads start at 2 parallel and
    ramp; `files_per_hour` / `albums_per_day` (`pacing.Window`, catalog `quota`) stop a sync cleanly and
-   `queue_resume_at` + `Engine.resume_queue` carry on later; a sync reads at most `READ_BATCH` (25)
-   unread album pages, the rest follow in the next run. Respect robots.txt (it only disallows /unavailable).
+   `queue_resume_at` + `Engine.resume_queue` carry on later; a sync reads at most `albums_per_batch` (default
+   `READ_BATCH` = 1) unread album pages, one at a time, the rest follow in the next run. Respect robots.txt
+   (it only disallows /unavailable) - fetched once a day in a client of its own (`Engine._robots`), never in
+   front of page requests: a session opening with robots.txt got the Cloudflare check.
 
 ## Publishing (GitHub: sireteanu/khinsider-sync)
 - Same release process as Rom Sync: **every push that changes the app is its own version**. Bump the

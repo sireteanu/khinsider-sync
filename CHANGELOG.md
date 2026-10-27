@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.0.16] - 2026-10-27
+
+### Fixed
+- Syncing an album whose page hadn't been read yet got khinsider's Cloudflare browser check, while
+  opening the same album worked. The sync asked for robots.txt first in the same connection, which
+  looks like a bot; robots.txt is now fetched on its own, once a day.
+
+### Changed
+- **Albums at a time** (Settings → Go easy on khinsider, 1 by default): a sync reads one new album
+  page, downloads that album, then reads the next - one page at a time, never a burst (was 25 pages,
+  4 at a time).
+
 ## [1.0.15] - 2026-10-27
 
 ### New

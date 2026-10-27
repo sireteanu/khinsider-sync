@@ -111,3 +111,16 @@ def test_robots_txt_sent_as_html_is_still_respected(site, app_factory):
     c = app_factory(site)
     scan(c)
     assert not [p for p, _ in site.requests if p.startswith("/game-soundtracks/browse/B")]
+
+
+
+def test_robots_txt_is_not_asked_for_in_front_of_page_requests(site, app_factory):
+    """A session opening with robots.txt got Cloudflare's browser check on the album page that
+    followed (owner's server, 1.0.15) - robots.txt now comes in its own session, once a day."""
+    c = app_factory(site)
+    scan(c)
+    select(c, "a:persona-5")
+    sync(c)
+    sync(c)
+    robots = [p for p, _ in site.requests if p == "/robots.txt"]
+    assert len(robots) == 1, "kept for a day"

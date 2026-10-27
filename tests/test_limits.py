@@ -10,6 +10,11 @@ def album_page_requests(site):
     return [p for p, _ in site.requests if p.startswith("/game-soundtracks/album/") and p.count("/") == 3]
 
 
+def test_one_album_at_a_time_is_the_default():
+    from khinsider_sync.catalog import DEFAULT_SETTINGS
+    assert DEFAULT_SETTINGS["albums_per_batch"] == 1 and DEFAULT_SETTINGS["pages_per_minute"] == 60
+
+
 def test_page_rate_spaces_requests():
     async def run():
         rate = PageRate(600)                      # one every 0.1 s
@@ -84,11 +89,9 @@ def test_pages_a_minute_slows_page_reads(site, app_factory):
     assert took >= 12, took
 
 
-def test_a_long_list_is_done_in_batches(site_factory, app_factory, monkeypatch):
-    import khinsider_sync.engine as engine_mod
-    monkeypatch.setattr(engine_mod, "READ_BATCH", 2)
+def test_a_long_list_is_done_in_batches(site_factory, app_factory):
     site = site_factory()
-    c = app_factory(site, settings={"album_art": False})
+    c = app_factory(site, settings={"album_art": False, "albums_per_batch": 2})
     scan(c)
     select(c, "p:windows")                        # 3 albums, none read yet
     site.reset_log()
@@ -101,3 +104,13 @@ def test_a_long_list_is_done_in_batches(site_factory, app_factory, monkeypatch):
     st = wait(c)
     assert st["sync"]["albums"] == 1 and not st["queue_resume_at"]
     assert len({f.split("/")[0] for f in on_disk(c.data)}) == 3
+
+
+def test_one_album_at_a_time(site, app_factory):
+    c = app_factory(site, settings={"album_art": False, "albums_per_batch": 1})
+    scan(c)
+    select(c, "p:windows")
+    site.reset_log()
+    st = sync(c)
+    assert len(album_page_requests(site)) == 1 and st["sync"]["albums"] == 1
+    assert any("this sync does 1 of them" in m for m in log_lines(st))

@@ -74,8 +74,11 @@ reads pages too fast - then nothing can be read for a while. In Settings → **G
   the pace of a big sync.
 - **Files an hour** and **Albums a day**: spread a long list over hours or days.
 
-A sync reads at most 25 new album pages, downloads those albums, and goes on with the next 25 by
-itself. When a limit is reached it stops cleanly and carries on by itself when there's room again.
+- **Albums at a time** (1 by default): how many new album pages a sync reads before downloading
+  those albums. With 1, it reads one album's page, downloads that album, then reads the next - it
+  never asks for a pile of pages in a row. It goes on with the next albums by itself.
+
+ When a limit is reached it stops cleanly and carries on by itself when there's room again.
 
 ## 6. Sync
 

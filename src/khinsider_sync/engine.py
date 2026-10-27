@@ -92,7 +92,7 @@ def track_name(f: dict) -> str:
     return safe_segment(f"{number} - {title}{f['ext']}")
 
 
-READ_BATCH = 25          # album pages a sync reads before downloading; the rest follow in later runs
+READ_BATCH = 1           # default of albums_per_batch: album pages a sync reads before downloading them
 
 
 def file_intact(root: str, rel: str, size: Optional[int]) -> bool:
@@ -212,6 +212,7 @@ class Engine:
         self.cleanup_progress: Optional[dict] = None  # Clean up's look through the folder: {files, expected}
         self._notifying: set = set()                  # notifications being sent
         self.page_rate = PageRate(0)                   # pacing.py: set per job from pages_per_minute
+        self._robots_cache: Optional[tuple] = None     # (when, RobotFileParser or None): robots.txt for a day
         self.limit_hit: Optional[str] = None           # a files-per-hour / albums-per-day limit stopped the sync
         self._sel_cache = None
 
@@ -364,7 +365,7 @@ class Engine:
                      "queue_resume_at"):
                 continue
             if k in ("parallel_max", "sync_every_hours", "full_scan_every_days", "check_folder_days",
-                     "pages_per_minute", "files_per_hour", "albums_per_day"):
+                     "pages_per_minute", "files_per_hour", "albums_per_day", "albums_per_batch"):
                 v = max(0, int(float(v or 0)))
             if k == "outage_wait_hours":
                 v = max(0.0, float(v or 0))
@@ -469,20 +470,28 @@ class Engine:
                                  limits=httpx.Limits(max_connections=n, max_keepalive_connections=n),
                                  headers=browser_headers(self.base))
 
-    async def _robots(self, client) -> Optional[RobotFileParser]:
+    async def _robots(self, client=None) -> Optional[RobotFileParser]:
+        """khinsider's robots.txt - kept for a day, and fetched in a session of its own: a session
+        that opens with robots.txt looks like a bot to Cloudflare, and the album page asked for next
+        in it got the browser check (seen on the owner's server; opening an album, without it, didn't)."""
         if self.ignore_robots:
             return None
+        cached = self._robots_cache
+        if cached and time.time() - cached[0] < 86400:
+            return cached[1]
         p = urlsplit(self.base)
+        rp = None
         try:
-            r = await client.get(f"{p.scheme}://{p.netloc}/robots.txt", timeout=10)
+            async with self._client() as own:
+                r = await own.get(f"{p.scheme}://{p.netloc}/robots.txt", timeout=10)
             # khinsider serves robots.txt as text/html: judge by the content, not the type
             if r.status_code == 200 and not r.text.lstrip().startswith("<"):
                 rp = RobotFileParser()
                 rp.parse(r.text.splitlines())
-                return rp
         except httpx.HTTPError:
-            pass
-        return None
+            return None                          # try again next job
+        self._robots_cache = (time.time(), rp)
+        return rp
 
     def _scanner(self, client, robots) -> Scanner:
         self.scanner = Scanner(self.catalog, self.base, client, workers=self.scan_workers,
@@ -642,10 +651,11 @@ class Engine:
         # a long list is done in batches: read a few album pages, download those albums, carry on -
         # never thousands of pages up front (that's what gets a connection challenged)
         later: list = []
-        if len(unread) > READ_BATCH and not only:
+        batch = max(1, int(s.get("albums_per_batch") or READ_BATCH))
+        if len(unread) > batch and not only:
             unread.sort(key=lambda a: (albums[a]["name"] or a).casefold())
-            later = unread[READ_BATCH:]
-            unread = unread[:READ_BATCH]
+            later = unread[batch:]
+            unread = unread[:batch]
             skip = set(later)
             slugs = [a for a in slugs if a not in skip]
             albums = {a: d for a, d in albums.items() if a not in skip}
@@ -654,7 +664,9 @@ class Engine:
         if unread:
             self.job["phase"] = "reading album pages"
             log.info("Reading %d album pages first", len(unread))
-            res = await self._scanner(client, robots).read_albums(unread, "album pages")
+            sc = self._scanner(client, robots)
+            sc.workers = 1                       # one page at a time, never a burst
+            res = await sc.read_albums(unread, "album pages")
             if self.stop_requested:
                 return {}
             if self.scanner.challenged:          # track pages would get the same: no downloads now

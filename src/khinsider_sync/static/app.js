@@ -1037,6 +1037,7 @@ $("#btn-settings").addEventListener("click", async () => {
   form.pages_per_minute.value = s.pages_per_minute ?? 60;
   form.files_per_hour.value = s.files_per_hour || 0;
   form.albums_per_day.value = s.albums_per_day || 0;
+  form.albums_per_batch.value = s.albums_per_batch || 1;
   const cd = String(s.check_folder_days || 0);
   if (![...form.check_folder_days.options].some((o) => o.value === cd)) {
     const o = document.createElement("option"); o.value = cd; o.textContent = `Every ${cd} days`; form.check_folder_days.append(o);
@@ -1114,6 +1115,7 @@ $("#settings-save").addEventListener("click", async (e) => {
     pages_per_minute: form.pages_per_minute.value || 0,
     files_per_hour: form.files_per_hour.value || 0,
     albums_per_day: form.albums_per_day.value || 0,
+    albums_per_batch: Math.max(1, Number(form.albums_per_batch.value) || 1),
     outage_wait_hours: form.outage_wait_hours.value || 0,
     resume_interrupted: form.resume_interrupted.checked,
   };

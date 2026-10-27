@@ -296,6 +296,8 @@
         <label class="field"><span>Files an hour</span><input name="files_per_hour" type="number" min="0" step="1"><small>0 = no limit.</small></label>
         <label class="field"><span>Albums a day</span><input name="albums_per_day" type="number" min="0" step="1"><small>New albums started; ones under way finish. 0 = no limit.</small></label>
       </div>
+      <label class="field"><span>Albums at a time</span><input name="albums_per_batch" type="number" min="1" step="1" style="max-width:120px">
+        <small>A sync reads this many new album pages (one by one), downloads those albums, then goes on with the next. 1 = one album at a time.</small></label>
       <small>khinsider publishes no limit; its Cloudflare protection starts asking for a browser check when a
         connection reads pages too fast. When a limit is reached the sync stops and <b>carries on by itself</b> as
         soon as there is room again - a big list spreads over hours or days.</small></fieldset>
