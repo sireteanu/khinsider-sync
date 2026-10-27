@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.0.15] - 2026-10-27
+
+### New
+- **Go easy on khinsider** (Settings): page reads a minute (60 by default), files an hour and albums a
+  day. When a limit is reached the sync stops cleanly - files under way finish - and carries on by
+  itself as soon as there's room again; the Activity panel says when.
+
+### Changed
+- A sync with many unread albums no longer reads all their pages first: it reads 25, downloads those
+  albums, and carries on with the next 25 by itself. (Reading thousands of pages in one go is what gets a
+  connection a Cloudflare browser check.)
+
 ## [1.0.14] - 2026-10-27
 
 ### New

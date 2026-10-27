@@ -61,6 +61,8 @@ def app_factory(tmp_path):
         c.__enter__()
         clients.append(c)
         c.data = data
+        # no page pacing in tests (the mock site is local) unless a test asks for it
+        settings = dict({} if password else {"pages_per_minute": 0}, **(settings or {}))
         if settings:
             r = c.post("/api/settings", json=settings)
             assert r.status_code == 200, r.text

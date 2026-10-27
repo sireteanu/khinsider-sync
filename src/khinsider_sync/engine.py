@@ -27,6 +27,7 @@ from . import __version__, parse
 from .catalog import (ALBUM, PLATFORM, SYNCED_WORDS, Catalog, album_plan, album_rank, album_wants,
                       parse_format_setting, parse_formats)
 from .core.constants import AUDIO_EXTENSIONS, BEST_ORDER
+from .pacing import PageRate, Window
 from .scanner import Scanner
 
 log = logging.getLogger("khinsider_sync")
@@ -91,6 +92,9 @@ def track_name(f: dict) -> str:
     return safe_segment(f"{number} - {title}{f['ext']}")
 
 
+READ_BATCH = 25          # album pages a sync reads before downloading; the rest follow in later runs
+
+
 def file_intact(root: str, rel: str, size: Optional[int]) -> bool:
     """Is a downloaded file still in the folder, with the size it was saved with (when known)?"""
     try:
@@ -115,8 +119,9 @@ class Resolver:
     the track page right before the download (the page holds every format's link, so it is read
     once per track and kept for its other formats)."""
 
-    def __init__(self, client: httpx.AsyncClient, pages: dict, keep: int = 4000):
+    def __init__(self, client: httpx.AsyncClient, pages: dict, keep: int = 4000, page_rate=None):
         self.client = client
+        self.page_rate = page_rate
         self.pages = pages                     # catalog address -> track page (None: download as is)
         self.cache: "collections.OrderedDict[str, dict]" = collections.OrderedDict()
         self.locks: dict = {}
@@ -142,6 +147,8 @@ class Resolver:
             if page in self.cache:
                 return self.cache[page]
             self.requests += 1
+            if self.page_rate is not None:
+                await self.page_rate.wait()
             r = await self.client.get(page)
             if is_challenge(r.status_code, r.headers):
                 raise ResolveError(f"track page: HTTP {r.status_code} (Cloudflare browser check)", status=r.status_code,
@@ -204,6 +211,8 @@ class Engine:
         self.check_progress: Optional[dict] = None    # Check download folder: {total, done, missing}
         self.cleanup_progress: Optional[dict] = None  # Clean up's look through the folder: {files, expected}
         self._notifying: set = set()                  # notifications being sent
+        self.page_rate = PageRate(0)                   # pacing.py: set per job from pages_per_minute
+        self.limit_hit: Optional[str] = None           # a files-per-hour / albums-per-day limit stopped the sync
         self._sel_cache = None
 
     # ------------------------------------------------------------------ where albums are saved
@@ -351,9 +360,11 @@ class Engine:
                 continue
             if k == "data_dir" and self.data_locked:
                 continue
-            if k in ("interrupted_job", "album_places", "album_formats", "album_upgrades", "last_folder_check"):
+            if k in ("interrupted_job", "album_places", "album_formats", "album_upgrades", "last_folder_check",
+                     "queue_resume_at"):
                 continue
-            if k in ("parallel_max", "sync_every_hours", "full_scan_every_days", "check_folder_days"):
+            if k in ("parallel_max", "sync_every_hours", "full_scan_every_days", "check_folder_days",
+                     "pages_per_minute", "files_per_hour", "albums_per_day"):
                 v = max(0, int(float(v or 0)))
             if k == "outage_wait_hours":
                 v = max(0.0, float(v or 0))
@@ -477,6 +488,7 @@ class Engine:
         self.scanner = Scanner(self.catalog, self.base, client, workers=self.scan_workers,
                                delay=self.scan_delay, user_agent=USER_AGENT, robots=robots,
                                store=self.store_album)
+        self.scanner.page_rate = self.page_rate
         return self.scanner
 
     async def _run(self, kind: str, albums: Optional[list]) -> None:
@@ -484,6 +496,8 @@ class Engine:
         summary: dict = {}
         try:
             s = self.catalog.settings()
+            self.page_rate = PageRate(float(s.get("pages_per_minute") or 0))
+            self.limit_hit = None
             days = float(s.get("check_folder_days") or 0)
             if kind == "check":                  # only the disk: no requests
                 summary["check"] = await self._check_folder()
@@ -575,7 +589,7 @@ class Engine:
                             f"New on khinsider for your ticked platforms: {notify.album_list(mine)}."
                             + ("" if kind.endswith("+sync") else " The next sync downloads them."))
             problem = None
-            if sy.get("paused"):
+            if sy.get("paused") and not self.limit_hit:
                 problem = f"The sync paused: {sy['paused']}"
             elif summary.get("error"):
                 problem = f"The {kind} failed: {self.job.get('message') or summary['error']}"
@@ -597,9 +611,46 @@ class Engine:
             log.warning("Nothing is ticked - tick the albums or platforms you want, then sync.")
             return {"files": 0}
         albums = self.catalog.albums_by_slug(slugs)
+        # albums per day (pacing.py): albums not started yet beyond the day's room wait for a later run -
+        # their pages aren't even read now. Albums already under way always continue.
+        held: list = []
+        day = Window(int(s.get("albums_per_day") or 0), 86400, self.catalog.quota_times("album", 86400))
+        if day.limit and not only:
+            begun = self.catalog.quota_keys("album", 86400)
+            fresh = []
+            for a in sorted(albums, key=lambda a: (albums[a]["name"] or a).casefold()):
+                d = albums[a]
+                t = self.catalog.album_totals(a, d["formats"], s) if d["read"] else None
+                if a in begun or (t and t["synced"]) or (t and t["downloaded"] and not d["changed"]):
+                    continue                     # under way, or done (skipped further down)
+                fresh.append(a)
+            for a in fresh:
+                if day.take():
+                    self.catalog.quota_add("album", a)
+                else:
+                    held.append(a)
+            if held:
+                waiting = set(held)
+                slugs = [a for a in slugs if a not in waiting]
+                albums = {a: d for a, d in albums.items() if a not in waiting}
+                log.info("Albums per day: %d albums wait for later (limit %d a day) - the app carries on "
+                         "by itself at %s", len(held), day.limit, time.strftime("%a %H:%M", time.localtime(day.free_at())))
+        self.catalog.commit()
         # khinsider doesn't change albums once they're up: a page is read once, the first time its
         # album is synced (or opened), and never again
         unread = [a for a in slugs if a in albums and not albums[a]["missing"] and not albums[a]["read"]]
+        # a long list is done in batches: read a few album pages, download those albums, carry on -
+        # never thousands of pages up front (that's what gets a connection challenged)
+        later: list = []
+        if len(unread) > READ_BATCH and not only:
+            unread.sort(key=lambda a: (albums[a]["name"] or a).casefold())
+            later = unread[READ_BATCH:]
+            unread = unread[:READ_BATCH]
+            skip = set(later)
+            slugs = [a for a in slugs if a not in skip]
+            albums = {a: d for a, d in albums.items() if a not in skip}
+            log.info("%d ticked albums haven't been read yet: this sync does %d of them, then carries on "
+                     "with the next ones by itself", len(unread) + len(later), len(unread))
         if unread:
             self.job["phase"] = "reading album pages"
             log.info("Reading %d album pages first", len(unread))
@@ -670,6 +721,7 @@ class Engine:
             self.catalog.set_local(url, word, size, None)
             if word in ("new", "updated", "resumed"):
                 self.catalog.add_change(job_id, word, rel, size)
+                self.catalog.quota_add("file", rel)
                 got.add(album_of.get(url))
 
         def on_failed(url, rel, err):
@@ -679,7 +731,7 @@ class Engine:
             self.catalog.add_change(job_id, "failed", rel, None, err)
 
         allowed = (lambda u: robots.can_fetch(USER_AGENT, u)) if robots else None
-        resolver = Resolver(client, {r[0]: r[6] for r in rows if r[6]})
+        resolver = Resolver(client, {r[0]: r[6] for r in rows if r[6]}, page_rate=self.page_rate)
         self.downloader = dl = Downloader(cfg, client, manifest, self.gate, root=data_dir,
                                           bucket=RateLimit(rate) if rate else None, allowed=allowed,
                                           on_done=on_done, on_failed=on_failed, resolve=resolver)
@@ -737,11 +789,23 @@ class Engine:
         self._eta_samples.clear()
         self.eta_speed = 0.0
 
+        # files per hour (pacing.py): when reached, the sync stops cleanly and carries on later
+        hour = Window(int(s.get("files_per_hour") or 0), 3600, self.catalog.quota_times("file", 3600))
+        counted: set = set()                     # files already counted (the gate can put one back in the queue)
+
         async def worker():
             while True:
                 item = await queue.get()
                 claimed[0] += 1
                 try:
+                    if item[0] not in counted and (self.limit_hit or (not dl.paused and not dl.stop_requested
+                                                                      and not hour.take())):
+                        if not self.limit_hit:   # files under way finish; no new one starts
+                            self.limit_hit = (f"the limit of {hour.limit} files an hour is reached - the app carries "
+                                              f"on by itself at {time.strftime('%H:%M', time.localtime(hour.free_at()))}")
+                            log.info("Files per hour: %s", self.limit_hit)
+                        continue                 # stays queued for the next run
+                    counted.add(item[0])
                     await run_item(dl, self.gate, queue, item)
                 except asyncio.CancelledError:
                     raise
@@ -772,6 +836,8 @@ class Engine:
         best = None
         try:
             await queue.join()
+            if self.limit_hit and not dl.paused:
+                dl.paused = self.limit_hit       # shown as "Paused: ..." - the sync carries on by itself
         finally:
             for task in tasks:
                 task.cancel()
@@ -803,6 +869,19 @@ class Engine:
         summary["paused"] = dl.paused
         summary["server_max"] = best
         summary["track_pages"] = resolver.requests
+        # carry on by itself when a limit stopped this sync (not when you pressed Stop)
+        resume = 0.0
+        if not self.stop_requested:
+            if self.limit_hit:
+                resume = hour.free_at()
+            if held:
+                resume = max(resume, day.free_at()) if self.limit_hit else day.free_at()
+            if later and not resume:
+                resume = time.time()             # the next batch right away
+        self.catalog.save_settings({"queue_resume_at": resume})
+        summary["waiting_albums"] = len(held)
+        summary["next_batch"] = len(later)
+        summary["resume_at"] = resume
         names = self.catalog.albums_by_slug({a for a in got if a})
         summary["got_albums"] = sorted(names[a]["name"] for a in names)
         log.info("Sync %s: %d new, %d updated, %d resumed, %d failed, %s downloaded%s",
@@ -1276,12 +1355,24 @@ class Engine:
         log.info("The last sync didn't finish (the app was closed or stopped) - continuing it")
         return self.start("sync")
 
+    def resume_queue(self) -> bool:
+        """A files-per-hour / albums-per-day limit stopped the last sync and there's room again:
+        carry on (called by the scheduler every 30 s)."""
+        resume = float(self.catalog.settings().get("queue_resume_at") or 0)
+        if not resume or time.time() < resume or self.busy:
+            return False
+        self.catalog.save_settings({"queue_resume_at": 0})
+        log.info("Carrying on with the queue (a limit had stopped the last sync)")
+        return self.start("sync", scheduled=True)
+
     async def scheduler_loop(self, resume_delay: float = 3.0) -> None:
         self._schedule_next()
         await asyncio.sleep(resume_delay)
         self.resume_interrupted()
         while True:
             await asyncio.sleep(30)
+            if self.resume_queue():
+                continue
             if self.next_run and time.time() >= self.next_run and not self.busy:
                 s = self.catalog.settings()
                 days = float(s.get("full_scan_every_days") or 0)
@@ -1326,6 +1417,8 @@ class Engine:
             "catalog": dict(c, last_full_scan=full),
             "selection": self.selection(),
             "next_run": self.next_run,
+            "queue_resume_at": float(s.get("queue_resume_at") or 0) or None,
+            "limits": {k: int(s.get(k) or 0) for k in ("pages_per_minute", "files_per_hour", "albums_per_day")},
             "leftovers": self.leftovers,
             "data_dir": s["data_dir"],
             "version_key": self.catalog.version,

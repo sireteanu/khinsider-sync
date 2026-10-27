@@ -760,7 +760,11 @@ function renderStatus(st) {
   if (!paused.hidden) paused.textContent = "Paused: " + st.sync.paused;
   renderEta(st, busy);
   renderLeftovers(st.leftovers, busy);
-  $("#next-run").textContent = st.next_run ? `Next automatic sync at ${new Date(st.next_run * 1000).toLocaleString()}` : "";
+  const when = (t) => new Date(t * 1000).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" });
+  $("#next-run").textContent = st.queue_resume_at && !busy
+    ? `A limit stopped the sync - it carries on by itself ${when(st.queue_resume_at)}`
+      + (sel.albums - sel.downloaded > 0 ? ` (${nAlbums(sel.albums - sel.downloaded)} still to download)` : "")
+    : st.next_run ? `Next automatic sync at ${new Date(st.next_run * 1000).toLocaleString()}` : "";
 
   // log
   const log = $("#log");
@@ -1030,6 +1034,9 @@ $("#btn-settings").addEventListener("click", async () => {
   form.file_mode.value = s.file_mode || "";
   form.sync_every_hours.value = s.sync_every_hours;
   form.full_scan_every_days.value = s.full_scan_every_days;
+  form.pages_per_minute.value = s.pages_per_minute ?? 60;
+  form.files_per_hour.value = s.files_per_hour || 0;
+  form.albums_per_day.value = s.albums_per_day || 0;
   const cd = String(s.check_folder_days || 0);
   if (![...form.check_folder_days.options].some((o) => o.value === cd)) {
     const o = document.createElement("option"); o.value = cd; o.textContent = `Every ${cd} days`; form.check_folder_days.append(o);
@@ -1104,6 +1111,9 @@ $("#settings-save").addEventListener("click", async (e) => {
     sync_every_hours: form.sync_every_hours.value || 0,
     full_scan_every_days: form.full_scan_every_days.value || 0,
     check_folder_days: form.check_folder_days.value || 0,
+    pages_per_minute: form.pages_per_minute.value || 0,
+    files_per_hour: form.files_per_hour.value || 0,
+    albums_per_day: form.albums_per_day.value || 0,
     outage_wait_hours: form.outage_wait_hours.value || 0,
     resume_interrupted: form.resume_interrupted.checked,
   };

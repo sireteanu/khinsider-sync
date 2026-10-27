@@ -65,7 +65,19 @@ to see just those.
 
 Changing folders later is safe: the next sync moves what you have; nothing is downloaded twice.
 
-## 5. Sync
+## 5. Going easy on khinsider
+
+khinsider is protected by Cloudflare, which starts asking for a "browser check" when a connection
+reads pages too fast - then nothing can be read for a while. In Settings → **Go easy on khinsider**:
+
+- **Page reads a minute** (60 by default): every downloaded track needs its track page, so this sets
+  the pace of a big sync.
+- **Files an hour** and **Albums a day**: spread a long list over hours or days.
+
+A sync reads at most 25 new album pages, downloads those albums, and goes on with the next 25 by
+itself. When a limit is reached it stops cleanly and carries on by itself when there's room again.
+
+## 6. Sync
 
 Click **Sync ticked**. The Activity panel shows how much is left and how long it will take; the
 Downloading box shows each file. You can **Stop** at any time - the next sync continues where it
@@ -74,7 +86,7 @@ stopped, also after a restart or a power cut.
 If khinsider goes down, downloads wait for it and carry on by themselves. If it starts sending web
 pages instead of files (too many downloads), the sync pauses; the next one finishes the job.
 
-## 6. Downloaded albums are done
+## 7. Downloaded albums are done
 
 Once an album is downloaded, syncs leave it alone - they don't ask khinsider about it or look
 through its files again. The exception: when khinsider **replaces an album with another version**,
@@ -96,7 +108,7 @@ To move your whole collection to another format, change **Formats** in Settings 
 **Sync now** in an album's window syncs just that album.
 To pick up tracks khinsider added to an album later, open it and click **Read album page**.
 
-## 7. Keep it up to date
+## 8. Keep it up to date
 
 In Settings, set **Sync automatically every N hours** (e.g. 24). Each run first looks at khinsider's
 newest albums (one page), and every few days it reads the whole site, so new albums of your ticked
@@ -111,14 +123,14 @@ address - or for Pushbullet `pbul://` followed by your access token (pushbullet.
 Access Tokens) - and click **Send a test**. You hear when downloads finish, when new albums arrive for your
 ticked platforms, and when something needs a look.
 
-## 8. Clean up
+## 9. Clean up
 
 After a sync, the Activity panel says if files in your folder aren't part of the sync any more -
 removed from khinsider, in albums you unticked, or formats you no longer sync. Click **Review**, tick
 what should go, and confirm. Only files Khinsider Sync downloaded are ever listed; other music in the
 same folder is left alone.
 
-## 9. Activity log
+## 10. Activity log
 
 **Activity log** (top) lists every file added, updated or deleted, by day, for a year.
 

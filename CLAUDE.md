@@ -120,8 +120,11 @@ tests/  conftest (app_factory + API helpers), mock_site, fixtures/ (real markup 
    folder: `Engine._check_folder`, disk only) are the only ways back in. Before a
    full scan prunes, downloaded albums the lists no longer show are looked up once
    (`Scanner._follow_moved`) so a moved album keeps its tick and folder.
-10. Politeness: page reads 4 at a time with pacing (`Limiter`), downloads start at 2 parallel and
-   ramp; respect robots.txt (it only disallows /unavailable).
+10. Politeness: page reads 4 at a time with pacing (`Limiter`) and at most `pages_per_minute` for the
+   whole job (`pacing.PageRate`, also the Resolver's track pages); downloads start at 2 parallel and
+   ramp; `files_per_hour` / `albums_per_day` (`pacing.Window`, catalog `quota`) stop a sync cleanly and
+   `queue_resume_at` + `Engine.resume_queue` carry on later; a sync reads at most `READ_BATCH` (25)
+   unread album pages, the rest follow in the next run. Respect robots.txt (it only disallows /unavailable).
 
 ## Publishing (GitHub: sireteanu/khinsider-sync)
 - Same release process as Rom Sync: **every push that changes the app is its own version**. Bump the

@@ -1,0 +1,103 @@
+"""Going easy on khinsider (pacing.py): page reads a minute, files an hour, albums a day."""
+import asyncio
+import time
+
+from conftest import SMW, log_lines, on_disk, scan, select, sync, wait
+from khinsider_sync.pacing import PageRate, Window
+
+
+def album_page_requests(site):
+    return [p for p, _ in site.requests if p.startswith("/game-soundtracks/album/") and p.count("/") == 3]
+
+
+def test_page_rate_spaces_requests():
+    async def run():
+        rate = PageRate(600)                      # one every 0.1 s
+        t0 = time.monotonic()
+        for _ in range(6):
+            await rate.wait()
+        return time.monotonic() - t0
+    assert asyncio.run(run()) >= 0.45
+    assert asyncio.run(PageRate(0).wait()) is None
+
+
+def test_window():
+    w = Window(2, 3600, earlier=[time.time() - 4000, time.time() - 100])   # one fell out of the hour
+    assert w.room() == 1 and w.take() and not w.take()
+    assert 3400 < w.free_at() - time.time() <= 3500
+    assert Window(0, 3600).take() and Window(0, 3600).room() > 10 ** 6
+
+
+def test_albums_a_day(site, app_factory):
+    c = app_factory(site, settings={"albums_per_day": 2, "album_art": False})
+    scan(c)
+    select(c, "p:windows")                        # 3 albums
+    site.reset_log()
+    st = sync(c)
+    assert len(album_page_requests(site)) == 2, "only the albums it downloads now get their page read"
+    assert st["sync"]["albums"] == 2
+    assert any("Albums per day: 1 albums wait for later (limit 2 a day)" in m for m in log_lines(st))
+    assert st["queue_resume_at"] and 86000 < st["queue_resume_at"] - time.time() <= 86400
+    assert "khinsider asks" not in str(st["job"])
+    # the same day: nothing new starts
+    st = sync(c)
+    assert st["sync"]["albums"] == 0
+    # a day later
+    c.app.state.engine.catalog.db.execute("UPDATE quota SET t=t-86500")
+    st = sync(c)
+    assert st["sync"]["albums"] == 1 and not st["queue_resume_at"]
+    assert len({f.split("/")[0] for f in on_disk(c.data)}) == 3
+
+
+def test_files_an_hour_and_carrying_on_by_itself(site, app_factory):
+    c = app_factory(site, settings={"files_per_hour": 3})
+    scan(c)
+    select(c, "a:" + SMW)                         # 3 tracks and a cover
+    st = sync(c)
+    assert st["sync"]["new"] == 3 and "files an hour" in st["sync"]["paused"]
+    assert 3500 < st["queue_resume_at"] - time.time() <= 3600
+    e = c.app.state.engine
+    assert not c.portal.call(e.resume_queue), "not before the hour is over"
+    e.catalog.db.execute("UPDATE quota SET t=t-3700")
+    e.catalog.save_settings({"queue_resume_at": time.time() - 1})
+    assert c.portal.call(e.resume_queue)
+    st = wait(c)
+    assert st["sync"]["new"] == 1 and not st["sync"]["paused"] and not st["queue_resume_at"]
+    assert any("Carrying on with the queue" in m for m in log_lines(st))
+
+
+def test_stop_doesnt_carry_on(site, app_factory):
+    c = app_factory(site, settings={"files_per_hour": 1})
+    scan(c)
+    select(c, "a:" + SMW)
+    st = sync(c)
+    assert st["queue_resume_at"]
+    c.app.state.engine.catalog.save_settings({"queue_resume_at": 0})
+    assert not c.portal.call(c.app.state.engine.resume_queue)
+
+
+def test_pages_a_minute_slows_page_reads(site, app_factory):
+    c = app_factory(site, settings={"pages_per_minute": 120})   # one every 0.5 s
+    t0 = time.monotonic()
+    scan(c)                                        # the platform list + 27 letters + 2nd S page ~ 30 pages
+    took = time.monotonic() - t0
+    assert took >= 12, took
+
+
+def test_a_long_list_is_done_in_batches(site_factory, app_factory, monkeypatch):
+    import khinsider_sync.engine as engine_mod
+    monkeypatch.setattr(engine_mod, "READ_BATCH", 2)
+    site = site_factory()
+    c = app_factory(site, settings={"album_art": False})
+    scan(c)
+    select(c, "p:windows")                        # 3 albums, none read yet
+    site.reset_log()
+    st = sync(c)
+    assert len(album_page_requests(site)) == 2, "two pages, not all of them up front"
+    assert st["sync"]["albums"] == 2
+    assert any("3 ticked albums haven't been read yet: this sync does 2 of them" in m for m in log_lines(st))
+    assert st["queue_resume_at"] and st["queue_resume_at"] <= time.time() + 1, "the next batch right away"
+    assert c.portal.call(c.app.state.engine.resume_queue)
+    st = wait(c)
+    assert st["sync"]["albums"] == 1 and not st["queue_resume_at"]
+    assert len({f.split("/")[0] for f in on_disk(c.data)}) == 3

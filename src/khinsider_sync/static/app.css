@@ -413,3 +413,6 @@ table.files tr.unwanted td { opacity: .45; }
 .notify-box .unit input { flex: 1; min-width: 0; }
 .notify-box #notify-result.ok { color: var(--teal); }
 .notify-box #notify-result.error { color: var(--red); }
+
+.row3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 640px) { .row3 { grid-template-columns: 1fr; } }

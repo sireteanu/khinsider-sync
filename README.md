@@ -58,6 +58,7 @@ modest, don't sync the whole site, and consider [donating](https://downloads.khi
 | Tags | Optional: fill in the tags khinsider's files usually lack - title, album, track and disc number with totals, year - from the album page. Only missing tags are added; anything already there is kept. Done in the same pass as the cover, once per file. |
 | Notifications | Optional: a message to ntfy, Gotify, Pushbullet (`pbul://` + your access token), a Discord webhook or a Home Assistant webhook when a sync downloaded something (which albums), when new albums turn up for your ticked platforms, and when something needs a look (sync paused, job failed). **Send a test** in Settings. |
 | Upgrading | An album's window offers **Upgrade to FLAC** (or another format the album has that is better than what you downloaded: FLAC, WAV, APE, WV, M4A, OPUS, OGG, AAC, MP3). The album gets that format as its own formats and is ticked; once a sync has every new file, it deletes the album's files of the old format (images stay) and logs them in the Activity log as "Replaced by FLAC". Until then the old files stay and Clean up leaves them alone. **Cancel upgrade** puts the album's formats back. **Replace old formats** (Settings) does the same for every ticked album whenever the formats setting changes - switch to FLAC and the MP3s go once the FLACs are in. |
+| Going easy on khinsider | Settings → **Go easy on khinsider**: page reads a minute (album and track pages, default 60), files an hour, albums a day (both off by default). A sync never reads more than 25 unread album pages before downloading them; a longer list goes in batches. When a limit is reached or a batch is done, the sync stops cleanly and **carries on by itself** as soon as there's room again - the Activity panel says when. |
 | Tick from a list | ☰ → **Tick albums from a list**: paste or open a list of khinsider album addresses (or slugs; CSV/TSV first column) and tick them all at once - e.g. albums matched from a folder of older downloads. |
 | One album now | **Sync now** in an album's window syncs just that album (and ticks it). |
 | Playlists and covers | Optional: `<album>.m3u8` (track order, lengths, titles) and `folder.jpg` (khinsider's cover for the album: the first image on its page - the one its own lists show - copied from the downloaded images, or fetched on its own when images aren't synced; a PNG cover is converted to JPEG - see-through parts on black - or saved as `folder.png` without Pillow) in each downloaded album's folder, for Plex, Jellyfin, Kodi and players. They are written for every ticked album with downloaded music (also when one of its files failed, and after a paused sync), move with the album, go when turned off, and Clean up lists them with an unticked album's music. One that was deleted comes back at the next sync that downloads files of its album, or after Check files / Check download folder. A `folder.jpg` of your own is never replaced. **Put the cover into each music file** (optional) adds the same cover to MP3, FLAC, M4A and OGG/Opus files that carry no picture yet - pictures already inside are kept. Each file is tagged once, on a copy that replaces it, keeping its date and permissions; the download record learns the new size, so checks don't take it for a damaged file. |
@@ -304,6 +305,10 @@ Stored in the catalog (`settings` table); changed in the Settings dialog or `POS
 | `file_mode` | `777` | Permissions for downloaded files and new folders (octal; empty = system default) |
 | `sync_every_hours` | `0` | Automatic sync interval (0 = off) |
 | `full_scan_every_days` | `7` | With the schedule on: scan the whole site when the last full scan is older (else only the newest albums) |
+| `pages_per_minute` | `60` | khinsider page requests a minute (browse lists, album pages, track pages - one per track downloaded); 0 = no limit |
+| `files_per_hour` | `0` | Files downloaded in any 60 minutes; the rest waits; 0 = no limit |
+| `albums_per_day` | `0` | Albums started in any 24 hours (albums under way always finish); 0 = no limit |
+| `queue_resume_at` | `0` | Set by the app when a limit or batch stopped a sync: when it carries on |
 | `check_folder_days` | `0` | With the schedule on: check the download folder before a scheduled sync when the last check is this many days old (0 = never) |
 | `last_folder_check` | `0` | When the download folder was last checked (set by the app) |
 | `resume_interrupted` | `true` | Continue an unfinished sync when the app starts |
@@ -388,6 +393,7 @@ src/khinsider_sync/
   parse.py      page readers: parse_browse, parse_latest, parse_album, parse_track, parse_platforms
   extras.py     playlists and folder images next to downloaded albums
   covers.py     the cover and missing tags put into music files (mutagen)
+  pacing.py     page reads a minute (PageRate), files an hour / albums a day (Window)
   notify.py     notifications (ntfy / Gotify / Discord / webhooks)
   cleanup.py    Clean up: walk the download folder, judge files, delete confirmed ones
   static/       index.html, app.css, app.js - no build step, no CDN

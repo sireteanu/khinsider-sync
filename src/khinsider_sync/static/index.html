@@ -290,6 +290,15 @@
       <label class="field"><span>Sync automatically every</span><span class="unit"><input name="sync_every_hours" type="number" min="0" step="1"> hours</span><small>0 turns it off.</small></label>
       <label class="field"><span>Scan the whole site every</span><span class="unit"><input name="full_scan_every_days" type="number" min="0" step="1"> days</span><small>Other scheduled syncs only read khinsider's newest albums (usually one page).</small></label>
     </div>
+    <fieldset class="field limits-box"><legend>Go easy on khinsider</legend>
+      <div class="row3">
+        <label class="field"><span>Page reads a minute</span><input name="pages_per_minute" type="number" min="0" step="1"><small>Album and track pages - one per track downloaded. 0 = no limit.</small></label>
+        <label class="field"><span>Files an hour</span><input name="files_per_hour" type="number" min="0" step="1"><small>0 = no limit.</small></label>
+        <label class="field"><span>Albums a day</span><input name="albums_per_day" type="number" min="0" step="1"><small>New albums started; ones under way finish. 0 = no limit.</small></label>
+      </div>
+      <small>khinsider publishes no limit; its Cloudflare protection starts asking for a browser check when a
+        connection reads pages too fast. When a limit is reached the sync stops and <b>carries on by itself</b> as
+        soon as there is room again - a big list spreads over hours or days.</small></fieldset>
     <label class="field"><span>Before a scheduled sync, check the download folder for deleted files</span>
       <select name="check_folder_days">
         <option value="0">Never - leave the disks asleep</option>

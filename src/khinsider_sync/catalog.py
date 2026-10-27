@@ -50,6 +50,10 @@ DEFAULT_SETTINGS = {
     "outage_wait_hours": 12,        # how long a sync waits for the site when it's down
     "sync_every_hours": 0,          # 0 = off
     "full_scan_every_days": 7,      # with the schedule on: full scan when the last one is older (else only the newest albums)
+    "pages_per_minute": 60,         # khinsider page requests a minute (album + track pages; 0 = no limit) - pacing.py
+    "files_per_hour": 0,            # files downloaded in any hour (0 = no limit); the rest waits
+    "albums_per_day": 0,            # albums started in any 24 hours (0 = no limit); the rest waits
+    "queue_resume_at": 0,           # set by the app: a limit stopped a sync - it carries on at this time
     "check_folder_days": 0,         # with the schedule on: check the download folder for deleted files before a
                                     # scheduled sync when the last check is this many days old (0 = never: disks stay asleep)
     "last_folder_check": 0,         # when the download folder was last checked (set by the app)
@@ -224,6 +228,8 @@ class Catalog:
             CREATE INDEX IF NOT EXISTS changes_day ON changes(day);
             CREATE INDEX IF NOT EXISTS changes_job ON changes(job, kind);
             CREATE TABLE IF NOT EXISTS extras (rel TEXT PRIMARY KEY, album TEXT, kind TEXT, sig TEXT);
+            CREATE TABLE IF NOT EXISTS quota (t REAL, kind TEXT, key TEXT);
+            CREATE INDEX IF NOT EXISTS quota_t ON quota(kind, t);
         """)
         cols = {r[1] for r in self.db.execute("PRAGMA table_info(files)")}
         if "cover" not in cols:                  # 1.0.9: covers embedded into music files (covers.py)
@@ -575,6 +581,23 @@ class Catalog:
             return self.db.execute(q + " AND album=?", (album,)).fetchall()
 
     # ------------------------------------------------------------------ files the app made (extras.py)
+    # ------------------------------------------------------------------ limits (pacing.py)
+    def quota_add(self, kind: str, key: str, t: Optional[float] = None) -> None:
+        with self.lock:
+            self.db.execute("INSERT INTO quota VALUES (?,?,?)", (t or time.time(), kind, key))
+
+    def quota_times(self, kind: str, seconds: float) -> list:
+        """When each `kind` ("file" / "album") of the last `seconds` was started."""
+        with self.lock:
+            self.db.execute("DELETE FROM quota WHERE t<?", (time.time() - 3 * 86400,))
+            return [r[0] for r in self.db.execute("SELECT t FROM quota WHERE kind=? AND t>? ORDER BY t",
+                                                  (kind, time.time() - seconds))]
+
+    def quota_keys(self, kind: str, seconds: float) -> set:
+        with self.lock:
+            return {r[0] for r in self.db.execute("SELECT key FROM quota WHERE kind=? AND t>?",
+                                                  (kind, time.time() - seconds))}
+
     def extras(self) -> dict:
         """{rel: (album, kind, sig)} of the playlists and folder images this app wrote."""
         with self.lock:

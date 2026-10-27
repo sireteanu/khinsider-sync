@@ -48,6 +48,7 @@ class Scanner:
         self.user_agent = user_agent
         self.robots = robots
         self.store = store                # store(slug, parsed album page) -> files (engine.store_album)
+        self.page_rate = None             # pacing.PageRate shared with the rest of the job (or None)
         self.stopping = False
         # progress
         self.what = ""
@@ -84,6 +85,8 @@ class Scanner:
         err = "unknown error"
         for attempt in range(self.retries + 1):
             pause = None
+            if self.page_rate is not None:
+                await self.page_rate.wait()
             await self.lim.acquire()
             t0 = time.monotonic()
             try:
