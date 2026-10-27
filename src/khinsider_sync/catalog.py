@@ -722,6 +722,27 @@ class Catalog:
             self.db.commit()
         self.version += 1
 
+    def select_albums(self, slugs: Iterable[str], include: bool = True) -> int:
+        """Tick (or untick) many albums at once - one transaction. -> how many rules changed."""
+        types = self.settings().get("platform_types") or []
+        n = 0
+        with self.lock:
+            rules = self.rules()
+            for slug in slugs:
+                row = self.db.execute("SELECT platforms, type FROM albums WHERE slug=?", (slug,)).fetchone()
+                if row is None:
+                    continue
+                inherited = self.by_platform(split_platforms(row[0]), row[1] or "", rules, types)
+                key = ALBUM + slug
+                if include == inherited:
+                    self.db.execute("DELETE FROM selection WHERE key=?", (key,))
+                else:
+                    self.db.execute("INSERT OR REPLACE INTO selection VALUES (?,?)", (key, int(include)))
+                n += 1
+            self.db.commit()
+        self.version += 1
+        return n
+
     def clear_selection(self) -> None:
         with self.lock:
             self.db.execute("DELETE FROM selection")

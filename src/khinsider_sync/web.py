@@ -7,7 +7,9 @@ import collections
 import contextlib
 import os
 import logging
+import re
 import secrets
+import urllib.parse
 from typing import Optional
 
 from fastapi import Body, FastAPI, HTTPException, Request
@@ -331,6 +333,32 @@ def create_app(engine_factory, password: Optional[str] = None, on_restart=None, 
             raise HTTPException(400, "key must be a:<album> or p:<platform>")
         e.catalog.select(key, include)
         return {"ok": True}
+
+    @app.post("/api/select/list")
+    async def select_list(text: str = Body(..., embed=True), include: bool = Body(True, embed=True)):
+        """Tick the albums of a pasted / uploaded list: one per line - khinsider album addresses or
+        their last part (the slug); the first column of a CSV / tab-separated line counts; lines
+        starting with # are skipped. -> {ticked, unknown: [lines]}"""
+        e = eng()
+        slugs, unknown, seen = [], [], set()
+        for line in str(text or "").splitlines():
+            raw = line.strip()
+            if not raw or raw.startswith("#"):
+                continue
+            first = re.split(r"[\t,;]", raw, maxsplit=1)[0].strip().strip('"')
+            m = re.search(r"/game-soundtracks/album/([^/?#\s]+)", first)
+            slug = urllib.parse.unquote(m.group(1)) if m else first
+            if slug in seen:
+                continue
+            seen.add(slug)
+            if e.catalog.album(slug) is None:
+                unknown.append(raw)
+            else:
+                slugs.append(slug)
+        n = e.catalog.select_albums(slugs, include)
+        log.info("%s %d albums from a list%s", "Ticked" if include else "Unticked", n,
+                 f" ({len(unknown)} lines not found in the catalog)" if unknown else "")
+        return {"ticked": n, "unknown": unknown[:200], "unknown_count": len(unknown)}
 
     @app.post("/api/selection/clear")
     async def clear_selection():

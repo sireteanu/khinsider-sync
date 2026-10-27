@@ -27,6 +27,8 @@ is downloaded. Afterwards you see every album, with the platforms on the left.
 - Tick the box in front of a **platform** (or "Sync every album of …" above its list) to sync every
   album of that platform - also the ones khinsider adds later. Untick single albums to leave them
   out. A `-` box means some albums differ from the platform's tick.
+- Have a list of albums (addresses like `https://downloads.khinsider.com/game-soundtracks/album/…`)?
+  ☰ → **Tick albums from a list** ticks them all at once.
 - Click an album's name to see its tracks, formats and sizes. The first time you open it, its page
   is read from khinsider (a second or two).
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.0.14] - 2026-10-27
+
+### New
+- **Tick albums from a list** (☰ menu): paste or open a list of khinsider album addresses (or their
+  last part; the first column of a CSV) and tick them all at once. Lines it can't find are listed.
+
 ## [1.0.13] - 2026-10-25
 
 ### Fixed

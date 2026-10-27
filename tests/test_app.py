@@ -125,6 +125,29 @@ def test_ticking_a_platform_takes_every_album_and_exceptions(site, app_factory):
     assert c.get("/api/status").json()["selection"]["albums"] == 0
 
 
+def test_tick_albums_from_a_list(site, app_factory):
+    c = app_factory(site)
+    scan(c)
+    select(c, "p:nintendo-snes")
+    text = "\n".join([
+        "# my old albums",
+        "https://downloads.khinsider.com/game-soundtracks/album/persona-5",
+        "sonic-the-hedgehog-genesis,Sonic folder,97",            # CSV: the first column
+        "super-mario-world-snes-gamerip\tSuper Mario World",      # already ticked through SNES
+        "persona-5",                                               # twice
+        "no-such-album",
+        "",
+    ])
+    r = c.post("/api/select/list", json={"text": text}).json()
+    assert r["ticked"] == 3 and r["unknown"] == ["no-such-album"] and r["unknown_count"] == 1
+    ticked = set(albums(c, show="ticked"))
+    assert {"persona-5", "sonic-the-hedgehog-genesis", SMW} <= ticked
+    rules = c.get("/api/status").json()["selection"]
+    assert rules["albums"] == len(ticked)
+    r = c.post("/api/select/list", json={"text": "persona-5", "include": False}).json()
+    assert r["ticked"] == 1 and "persona-5" not in albums(c, show="ticked")
+
+
 def test_platform_ticks_can_be_limited_to_album_types(site, app_factory):
     c = app_factory(site, settings={"platform_types": ["Gamerip"]})
     scan(c)

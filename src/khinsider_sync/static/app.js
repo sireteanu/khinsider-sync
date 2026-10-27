@@ -1042,6 +1042,36 @@ $("#btn-settings").addEventListener("click", async () => {
   $("#settings-dlg").showModal();
 });
 
+/* ---------------------------------------------------------------- tick albums from a list */
+$("#btn-tick-list").addEventListener("click", () => {
+  $("#app-menu").hidden = true;
+  $("#list-result").hidden = true;
+  $("#list-dlg").showModal();
+});
+for (const id of ["#list-close", "#list-cancel"]) $(id).addEventListener("click", () => $("#list-dlg").close());
+$("#list-file").addEventListener("change", async (e) => {
+  const f = e.target.files[0];
+  if (f) $("#list-text").value = await f.text();
+});
+$("#list-go").addEventListener("click", async () => {
+  const text = $("#list-text").value;
+  const out = $("#list-result");
+  if (!text.trim()) { out.textContent = "Paste a list or open a file first."; out.className = "small error"; out.hidden = false; return; }
+  const go = $("#list-go");
+  go.disabled = true;
+  try {
+    const r = await api("/api/select/list", { method: "POST", body: { text } });
+    out.textContent = `Ticked ${nAlbums(r.ticked)}.` + (r.unknown_count
+      ? ` ${num(r.unknown_count)} ${r.unknown_count === 1 ? "line wasn't" : "lines weren't"} found in the catalog: ${r.unknown.slice(0, 5).join(" · ")}${r.unknown_count > 5 ? " …" : ""}`
+      : "");
+    out.className = "small " + (r.unknown_count ? "" : "ok");
+    out.hidden = false;
+    await Promise.all([loadPlatforms(), refreshList()]);
+    poll(true);
+  } catch (err) { out.textContent = "Not ticked: " + err.message; out.className = "small error"; out.hidden = false; }
+  go.disabled = false;
+});
+
 $("#notify-test").addEventListener("click", async () => {
   const out = $("#notify-result");
   const url = form.notify_url.value.trim();
