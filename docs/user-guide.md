@@ -86,6 +86,11 @@ Click **Sync ticked**. The Activity panel shows how much is left and how long it
 Downloading box shows each file. You can **Stop** at any time - the next sync continues where it
 stopped, also after a restart or a power cut.
 
+A long list of new albums goes **one run at a time** (see Albums at a time above). The box is then
+called **This run**: its size and time cover only the albums read so far, and the line under it
+says how many albums follow - their size isn't known until their pages are read. The app carries
+on with them by itself.
+
 If khinsider goes down, downloads wait for it and carry on by themselves. If it starts sending web
 pages instead of files (too many downloads), the sync pauses; the next one finishes the job.
 

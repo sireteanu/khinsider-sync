@@ -187,6 +187,7 @@ table.files td:nth-child(2), table.files td:nth-child(3) { white-space: nowrap; 
 #eta-time { font: 600 20px/1.2 var(--font-head); letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
 .bar.thin { height: 8px; background-image: none; }
 #eta-sub { margin-top: 6px; }
+#eta-next { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
 
 .dlg code { font-size: 12px; background: var(--field); padding: 1px 4px; border-radius: 3px; }
 .st-warn { color: var(--amber, #d9a441); }

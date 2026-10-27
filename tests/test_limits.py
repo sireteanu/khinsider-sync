@@ -43,6 +43,7 @@ def test_albums_a_day(site, app_factory):
     assert st["sync"]["albums"] == 2
     assert any("Albums per day: 1 albums wait for later (limit 2 a day)" in m for m in log_lines(st))
     assert st["queue_resume_at"] and 86000 < st["queue_resume_at"] - time.time() <= 86400
+    assert st["sync"]["albums_held"] == 1 and st["sync"]["held_until"] == st["queue_resume_at"]
     assert "khinsider asks" not in str(st["job"])
     # the same day: nothing new starts
     st = sync(c)
@@ -51,6 +52,7 @@ def test_albums_a_day(site, app_factory):
     c.app.state.engine.catalog.db.execute("UPDATE quota SET t=t-86500")
     st = sync(c)
     assert st["sync"]["albums"] == 1 and not st["queue_resume_at"]
+    assert st["sync"]["albums_later"] == 0
     assert len({f.split("/")[0] for f in on_disk(c.data)}) == 3
 
 
@@ -99,6 +101,7 @@ def test_a_long_list_is_done_in_batches(site_factory, app_factory):
     assert len(album_page_requests(site)) == 2, "two pages, not all of them up front"
     assert st["sync"]["albums"] == 2
     assert any("3 ticked albums haven't been read yet: this sync does 2 of them" in m for m in log_lines(st))
+    assert st["sync"]["albums_later"] == 1, "the Activity panel says one more album follows"
     assert st["queue_resume_at"] and st["queue_resume_at"] <= time.time() + 1, "the next batch right away"
     assert c.portal.call(c.app.state.engine.resume_queue)
     st = wait(c)

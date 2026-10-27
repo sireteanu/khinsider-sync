@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.17] - 2026-10-27
+
+### Improved
+- When a long list is done one run at a time, the Activity panel says so: the box is called
+  **This run**, and a line under it says how many albums still follow (and how many wait for room
+  under Albums a day). The time remaining no longer looks like the time for the whole list.
+
 ## [1.0.16] - 2026-10-27
 
 ### Fixed

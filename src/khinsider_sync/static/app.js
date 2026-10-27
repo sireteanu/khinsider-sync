@@ -865,8 +865,18 @@ function renderEta(st, busy) {
   $("#eta-time").textContent = time;
   $("#eta-bar").style.width = (total ? 100 * (total - left) / total : 100) + "%";
   let sub = `${bytes(total - left)} of ${bytes(total)} done, ${num(s.files_left)} ${s.files_left === 1 ? "file" : "files"} left`;
-  if (downloading && s.eta != null && !s.paused) sub += ` - done around ${clock(Date.now() / 1000 + s.eta)}`;
+  const more = (s.albums_later || 0) + (s.albums_held || 0);
+  if (downloading && s.eta != null && !s.paused) sub += ` - ${more ? "this run " : ""}done around ${clock(Date.now() / 1000 + s.eta)}`;
   $("#eta-sub").textContent = sub;
+  // a long list goes one run at a time: say what follows, so the time isn't taken for the whole job
+  $("#eta-label").textContent = more ? "This run" : "This sync";
+  const next = [];
+  if (s.albums_later) next.push(`${nAlbums(s.albums_later)} still to read and download - the app carries on with them by itself, `
+    + `one run after another. Their size isn't known until their pages are read.`);
+  if (s.albums_held) next.push(`${nAlbums(s.albums_held)} wait for room under Albums a day`
+    + (s.held_until ? ` (from ${new Date(s.held_until * 1000).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" })})` : "") + ".");
+  $("#eta-next").hidden = !next.length;
+  $("#eta-next").textContent = next.length ? "Then: " + next.join(" ") : "";
 }
 
 

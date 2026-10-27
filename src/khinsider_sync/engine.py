@@ -715,7 +715,11 @@ class Engine:
         st = self.sync_stats = {"total": len(rows), "albums": len(albums), "albums_done": len(done),
                                 "planned": 0, "to_fetch": 0,
                                 "new": 0, "updated": 0, "resumed": 0, "up to date": 0, "already in folder": 0,
-                                "failed": 0, "bytes_planned": 0, "bytes_settled": 0, "files_left": 0}
+                                "failed": 0, "bytes_planned": 0, "bytes_settled": 0, "files_left": 0,
+                                # what comes after this run (the Activity panel says so): ticked albums
+                                # whose pages the next runs read, and albums waiting for the day's room
+                                "albums_later": len(later), "albums_held": len(held),
+                                "held_until": day.free_at() if held else 0}
 
         def settle(url):
             if url in sizes:
