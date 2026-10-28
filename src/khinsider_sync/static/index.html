@@ -339,6 +339,18 @@
       </div></fieldset>
     <label class="check"><input type="checkbox" name="resume_interrupted"> Continue an unfinished sync when the app starts again (after a restart, crash or reboot)</label>
     <label class="check"><input type="checkbox" name="impersonate"> Look like Chrome to khinsider (its Cloudflare protection can turn other programs away)</label>
+    <fieldset class="field limits-box"><legend>khinsider account (optional)</legend>
+      <div class="row2">
+        <label class="field"><span>Username or email</span><input name="account_user" autocomplete="off" spellcheck="false"></label>
+        <label class="field"><span>Password</span><input name="account_password" type="password" autocomplete="new-password" placeholder=""></label>
+      </div>
+      <label class="check"><input type="checkbox" name="account_zips"> Download whole albums as one zip while the account allows it (paid accounts)</label>
+      <div class="row-inline"><button type="button" class="btn small" id="account-check">Check sign-in</button>
+        <span id="account-state" class="muted small"></span></div>
+      <small>khinsider lets paid accounts download whole albums at once. With one, a sync gets each MP3 or FLAC
+        album as a single zip and unpacks it under the app's names; other formats, and everything once the
+        account can't any more, come file by file as without an account. Stored on this server only; the
+        password is never shown again. Clear the username to remove the account.</small></fieldset>
     <p id="settings-error" class="error" hidden></p>
     <div class="dlg-foot"><button class="btn ghost" value="cancel">Cancel</button><button class="btn primary" id="settings-save" value="save">Save settings</button></div>
   </form>

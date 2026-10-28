@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html><head><title>My Downloads - Video Game Music</title></head><body>
+<!-- downloads.khinsider.com/cp/downloads signed in, October 2026: the "My Mass Downloads" table as served (two rows: one with MP3 and FLAC, one MP3 only) -->
+<div id="pageContent">
+<h2>My Mass Downloads</h2>
+<table id="top40" class="albumList">
+	<tbody><tr>           
+		<th></th>  		
+		<th><a href="?order=name&amp;sort=desc"><b>Album</b>&nbsp;▼</a></th>
+		<th style="text-align: center; width: 100px;"><b>Download</b></th>	
+		<th style="text-align: center"><a href="?order=timestamp&amp;sort=desc"><b>Added</b></a></th>	
+		<th style="text-align: center; width: 50px;"><b>Info</b></th>
+		<th style="text-align: center; width: 50px;"><b>Delete</b></th>		
+	</tr>
+		<tr>                                    
+		<td class="albumIcon"><a href="/game-soundtracks/album/aphelion-original-soundtrack-2026"><img src="https://vgmtreasurechest.com/soundtracks/aphelion-original-soundtrack-2026/thumbs_small/01%20Front.jpg"></a></td>
+		<td><a href="/game-soundtracks/album/aphelion-original-soundtrack-2026">Aphelion (Original Game Soundtrack) (2026)</a></td>
+	 	<td style="text-align: center; width: 100px;"><a href="https://vgmtreasurechest.com/soundtracks/aphelion-original-soundtrack-2026/skxzpg/Aphelion%20%28Original%20Game%20Soundtrack%29%20%282026%29.zip">MP3</a>
+		&nbsp;/&nbsp;<a href="https://vgmtreasurechest.com/soundtracks/aphelion-original-soundtrack-2026/skxzpg/Aphelion%20%28Original%20Game%20Soundtrack%29%20%282026%29%20%28FLAC%29.zip">FLAC</a></td>
+	 	<td>2026-10-28</td>
+	 	<td style="text-align: center; width: 50px;"><a href="https://vgmtreasurechest.com/soundtracks/aphelion-original-soundtrack-2026/khinsider.info.txt" target="_blank"><i class="material-icons txt_info_file">info</i></a></td>
+	 	<td style="text-align: center; width: 50px;"><i class="material-icons albumDelete" albumid="109836">delete_forever</i></td>
+	</tr>
+		<tr>                                    
+		<td class="albumIcon"><a href="/game-soundtracks/album/bead-theme-20-2025"><img src="https://vgmtreasurechest.com/soundtracks/bead-theme-20-2025/thumbs_small/Cover.jpg"></a></td>
+		<td><a href="/game-soundtracks/album/bead-theme-20-2025">BEA-D Theme 2.0 (2025)</a></td>
+	 	<td style="text-align: center; width: 100px;"><a href="https://vgmtreasurechest.com/soundtracks/bead-theme-20-2025/pqpezv/BEA-D%20Theme%202.0%20%282025%29.zip">MP3</a>
+		</td>
+	 	<td>2026-10-28</td>
+	 	<td style="text-align: center; width: 50px;"><a href="https://vgmtreasurechest.com/soundtracks/bead-theme-20-2025/khinsider.info.txt" target="_blank"><i class="material-icons txt_info_file">info</i></a></td>
+	 	<td style="text-align: center; width: 50px;"><i class="material-icons albumDelete" albumid="115636">delete_forever</i></td>
+	</tr>
+		</tbody></table>
+</div>
+<script>
+jQuery(function ($) {
+    $('.albumDelete').click(function () {   
+        albumDelete = $(this); 
+        var albumid = albumDelete.attr('albumid');
+        $.get('/cp/downloads_delete_album', { albumid: albumid } );
+		albumDelete.parent().parent().fadeOut(300, function(){ $(this).remove();});
+    });
+}); 
+</script>
+<a href="/logging/logout">Log Out</a>
+</body></html>

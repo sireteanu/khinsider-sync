@@ -222,7 +222,7 @@ def parse_album(body: bytes, page_url: str) -> dict:
     tree = LexborHTMLParser(body)
     content = tree.css_first("#pageContent") or tree.body
     out = {"slug": album_slug(page_url), "missing": False, "title": "", "platforms": [], "year": "",
-           "type": "", "added": None, "formats": [], "tracks": [], "images": []}
+           "type": "", "added": None, "formats": [], "tracks": [], "images": [], "albumid": None}
     if content is None:
         out["missing"] = True
         return out
@@ -232,6 +232,12 @@ def parse_album(body: bytes, page_url: str) -> dict:
     if out["title"].lower().startswith("ooops") or table is None:
         out["missing"] = True
         return out
+
+    # khinsider's own album number ("Download all songs at once" -> /cp/add_album/<id>): what a
+    # signed-in paid account asks for the album's zip with
+    mass = content.css_first(".albumMassDownload a[href*='/cp/add_album/']")
+    m = re.search(r"/cp/add_album/(\d+)", mass.attributes.get("href") or "") if mass is not None else None
+    out["albumid"] = int(m.group(1)) if m else None
 
     info = _info_html(content)
     if info:
@@ -485,3 +491,66 @@ def _good_mp3(url: str, slug: str) -> bool:
             and len(parts) >= 4 and parts[0] == "soundtracks" and unquote(parts[1]) == unquote(slug)
             and all(unquote(p) not in (".", "..") for p in parts)
             and unquote(parts[-1]).lower().endswith(".mp3") and not any(ord(c) < 32 for c in url))
+
+
+# ---------------------------------------------------------------------------- a khinsider account
+# (pages checked in a browser, October 2026: tests/fixtures/forum_login.html, cp_add_album*.html,
+# cp_downloads.html) - a paid account may download whole albums as zips ("mass downloads")
+
+def signed_in(html) -> bool:
+    """A page shows the "Log Out" link only to a signed-in visitor."""
+    text = html if isinstance(html, str) else html.decode("utf-8", "replace")
+    return 'href="/logging/logout"' in text
+
+
+def login_form(html) -> Optional[dict]:
+    """The forum's login form -> {action, fields: the hidden ones (_xfToken, _xfRedirect)}."""
+    tree = LexborHTMLParser(html)
+    for form in tree.css("form"):
+        action = form.attributes.get("action") or ""
+        if "login/login" not in action or form.css_first("input[name=password]") is None:
+            continue
+        fields = {i.attributes.get("name"): i.attributes.get("value") or ""
+                  for i in form.css("input[type=hidden]") if i.attributes.get("name")}
+        return {"action": action, "fields": fields}
+    return None
+
+
+def add_album_reply(html) -> dict:
+    """/cp/add_album/<id> -> {signed_in, zip: the album's MP3 zip address or None, message}."""
+    tree = LexborHTMLParser(html)
+    content = tree.css_first("#pageContent") or tree.body
+    title = _text(tree.css_first("title"))
+    zip_url = None
+    for a in (content.css("a[href]") if content is not None else []):
+        href = a.attributes.get("href") or ""
+        if href.lower().endswith(".zip"):
+            zip_url = href
+            break
+    message = ""
+    if content is not None:
+        p = content.css_first("p")
+        message = _text(p) if p is not None else _text(content)[:300]
+    # signed out the reply is titled "Please Log In" (fixtures/cp_add_album_signed_out.html)
+    return {"signed_in": title.strip().lower() != "please log in", "zip": zip_url, "message": message}
+
+
+def mass_downloads(html) -> dict:
+    """The "My Mass Downloads" list (/cp/downloads) -> {slug: {albumid, zips: {".mp3": url, ".flac": url}}}."""
+    tree = LexborHTMLParser(html)
+    out = {}
+    for tr in tree.css("table.albumList tr"):
+        link = tr.css_first(f"a[href*='{ALBUM_PREFIX}']")
+        delete = tr.css_first("[albumid]")
+        if link is None:
+            continue
+        slug = album_slug(link.attributes.get("href") or "")
+        zips = {}
+        for a in tr.css("a[href]"):
+            href = a.attributes.get("href") or ""
+            label = _text(a).upper()
+            if href.lower().endswith(".zip") and label in ("MP3", "FLAC"):
+                zips["." + label.lower()] = href
+        aid = delete.attributes.get("albumid") if delete is not None else None
+        out[slug] = {"albumid": int(aid) if aid and aid.isdigit() else None, "zips": zips}
+    return out

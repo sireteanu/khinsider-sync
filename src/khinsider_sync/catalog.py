@@ -58,6 +58,11 @@ DEFAULT_SETTINGS = {
     "album_pause_streak": 0,        # set by the app: albums since the last check after a pause
     "albums_per_batch": 1,          # album pages a sync reads (one at a time) before downloading them; then the next batch
     "player_links": True,           # MP3 addresses from the album page's player: no track page for them
+    "account_user": "",             # a khinsider account (paid: whole albums as zips) - account.py
+    "account_password": "",         # never sent to the page (web.public_settings)
+    "account_zips": True,           # use album zips while the account may (else file by file)
+    "account_cookies": {},          # set by the app: the signed-in session, kept between jobs
+    "account_status": {},           # set by the app: {state: ok | no_mass | failed, message, user, at}
     "challenge_retries": 0,         # set by the app: browser checks in a row (each doubles the wait)
     "queue_resume_at": 0,           # set by the app: a limit stopped a sync - it carries on at this time
     "check_folder_days": 0,         # with the schedule on: check the download folder for deleted files before a
@@ -287,6 +292,9 @@ class Catalog:
             self.db.execute("ALTER TABLE files ADD COLUMN tags TEXT")
         if "direct" not in cols:                 # 1.0.22: the MP3 address from the album page's player
             self.db.execute("ALTER TABLE files ADD COLUMN direct TEXT")
+        if "albumid" not in {r[1] for r in self.db.execute("PRAGMA table_info(albums)")}:
+            # 1.0.28: khinsider's album number, for a paid account's album zip (/cp/add_album/<id>)
+            self.db.execute("ALTER TABLE albums ADD COLUMN albumid INTEGER")
         if "changed" not in {r[1] for r in self.db.execute("PRAGMA table_info(albums)")}:
             # 1.0.11: when khinsider replaced the album with another version (seen in its newest list)
             self.db.execute("ALTER TABLE albums ADD COLUMN changed TEXT")
@@ -494,9 +502,9 @@ class Catalog:
                                 "type=COALESCE(NULLIF(type, ''), ?), year=COALESCE(NULLIF(year, ''), ?) "
                                 "WHERE slug=?", (plats, page["type"], page["year"], slug))
             self.db.execute("UPDATE albums SET read=?, error=NULL, missing=0, added=?, title=?, formats=?, "
-                            "tracks=?, images=? WHERE slug=?",
+                            "tracks=?, images=?, albumid=COALESCE(?, albumid) WHERE slug=?",
                             (now, page["added"], page["title"], ",".join(page["formats"]), len(page["tracks"]),
-                             len(page["images"]), slug))
+                             len(page["images"]), page.get("albumid"), slug))
             album = self.album(slug)
             rows = []
             for pos, t in enumerate(page["tracks"]):
@@ -607,6 +615,28 @@ class Catalog:
                 q = ("SELECT url, rel, album, ext, kind, size, page FROM files WHERE album IN (%s) "
                      "ORDER BY album, pos, ext" % ",".join("?" * len(chunk)))
                 out += self.db.execute(q, chunk).fetchall()
+        return out
+
+    def file_names(self, urls: Iterable[str]) -> dict:
+        """{catalog address: khinsider's file name} - how a file is called inside an album zip."""
+        urls = list(urls)
+        out = {}
+        with self.lock:
+            for i in range(0, len(urls), 500):
+                chunk = urls[i:i + 500]
+                out.update(self.db.execute("SELECT url, name FROM files WHERE url IN (%s)" % ",".join("?" * len(chunk)),
+                                           chunk).fetchall())
+        return out
+
+    def album_ids(self, albums: Iterable[str]) -> dict:
+        """{slug: khinsider's album number} of the given albums whose page showed it."""
+        albums = list(albums)
+        out = {}
+        with self.lock:
+            for i in range(0, len(albums), 500):
+                chunk = albums[i:i + 500]
+                out.update(self.db.execute("SELECT slug, albumid FROM albums WHERE albumid IS NOT NULL AND slug IN (%s)"
+                                           % ",".join("?" * len(chunk)), chunk).fetchall())
         return out
 
     def direct_links(self, albums: Iterable[str]) -> dict:

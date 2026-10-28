@@ -36,6 +36,8 @@ src/khinsider_sync/
   covers.py     optional cover and missing tags put into music files (mutagen); files.cover / files.tags,
                 Manifest.resized; one pass at the end of a sync (`Engine._tag_files`, `_finished_albums`)
   notify.py     notifications after jobs (ntfy / Gotify / Discord / JSON webhooks), never blocking a job
+  account.py    a khinsider account: XenForo sign-in, a paid account's album zips (add_album, My Mass
+                Downloads); used by `Engine._album_zips` / `_one_zip` before the file-by-file queue
   cleanup.py    Clean up: walk the download folder, judge files (gone / part / unticked), delete
   static/       index.html, app.css, app.js - no build step, no CDN (works offline on a LAN)
   core/         the sync engine from Rom Sync
@@ -93,6 +95,13 @@ tests/  conftest (app_factory + API helpers), mock_site, fixtures/ (real markup 
   of a connection (manual open, retry in a new job) went through, the second got the check.
   `tests/test_browser.py` checks what really goes out. Never let two layers both handle cookies.
   robots.txt comes as text/html.
+- **Paid accounts get album zips** (verified signed in, Oct 2026 - fixtures forum_login.html,
+  cp_add_album*.html, cp_downloads.html; README "Facts"): `/cp/add_album/<albumid>` (album page's
+  `.albumMassDownload`, `albums.albumid`) replies with the MP3 zip link, "Please Log In" when signed
+  out; the FLAC zip is only on `/cp/downloads`; `/cp/downloads_delete_album?albumid=` tidies up. Zips:
+  flat, khinsider's file names + images + khinsider.info.txt. Owner subscribes for the first big sync,
+  then cancels: everything must keep working file by file (`account.configured`, `Account.off`,
+  `account_status` no_mass). Never send the password or cookies to the page (`web.public_settings`).
 - Sizes are shown in MB with two decimals ("5.64 MB"); totals use thousands commas ("1,438 MB").
   No per-file dates: files get the album's Date Added (12:00 local time).
 

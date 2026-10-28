@@ -134,3 +134,33 @@ def make_transport(enabled: bool, max_clients: int) -> Optional[httpx.AsyncBaseT
 
 
 _warned = False
+
+
+# ---------------------------------------------------------------------------- the client's cookies
+# One place keeps a client's cookies: curl's session with ChromeTransport, httpx's jar otherwise.
+# (A signed-in khinsider account is its cookies; the app keeps them between jobs.)
+
+def _jar(client: httpx.AsyncClient):
+    t = getattr(client, "_transport", None)
+    return t.session.cookies if isinstance(t, ChromeTransport) else None
+
+
+def get_cookies(client: httpx.AsyncClient, domain: str) -> dict:
+    """{name: value} of the client's cookies for `domain` (and its parent domains)."""
+    curl = _jar(client)
+    jar = curl.jar if curl is not None else client.cookies.jar
+    out = {}
+    for c in jar:
+        d = (c.domain or "").lstrip(".")
+        if not d or domain == d or domain.endswith("." + d):
+            out[c.name] = c.value
+    return out
+
+
+def set_cookies(client: httpx.AsyncClient, cookies: dict, domain: str) -> None:
+    curl = _jar(client)
+    for name, value in (cookies or {}).items():
+        if curl is not None:
+            curl.set(name, value, domain=domain, path="/")
+        else:
+            client.cookies.set(name, value, domain=domain, path="/")

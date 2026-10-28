@@ -29,6 +29,14 @@ SORTS = ("name", "year", "added", "new", "size", "synced")
 SHOWS = ("all", "ticked", "downloaded", "partly", "notdownloaded", "failed", "unread")
 
 
+def public_settings(s: dict) -> dict:
+    """Settings as the page gets them: never the khinsider password or session cookies."""
+    out = dict(s)
+    out["account_password_set"] = bool(out.pop("account_password", ""))
+    out.pop("account_cookies", None)
+    return out
+
+
 def parse_types(text: str) -> tuple:
     """The type filter: "Gamerip,Soundtrack" -> ("Gamerip", "Soundtrack"); "Other" = albums without a type."""
     return tuple(sorted({t.strip() for t in str(text or "").split(",") if t.strip()}))
@@ -287,6 +295,10 @@ def create_app(engine_factory, password: Optional[str] = None, on_restart=None, 
                 "upgrade": e.upgrade_info(slug, s),
                 "page": f"{e.base}game-soundtracks/album/{slug}"}
 
+    @app.post("/api/account/check")
+    async def account_check():
+        return await eng().check_account()
+
     @app.post("/api/album/read")
     async def album_read(slug: str = Body(..., embed=True)):
         e = eng()
@@ -421,12 +433,12 @@ def create_app(engine_factory, password: Optional[str] = None, on_restart=None, 
     @app.get("/api/settings")
     async def get_settings():
         e = eng()
-        return {"settings": e.catalog.settings(), "data_locked": e.data_locked}
+        return {"settings": public_settings(e.catalog.settings()), "data_locked": e.data_locked}
 
     @app.post("/api/settings")
     async def set_settings(values: dict = Body(...)):
         try:
-            return {"settings": eng().update_settings(values), "data_locked": eng().data_locked}
+            return {"settings": public_settings(eng().update_settings(values)), "data_locked": eng().data_locked}
         except (ValueError, Exception) as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
 

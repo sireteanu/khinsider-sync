@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.0.28] - 2026-10-28
+
+### New
+- **khinsider account** (Settings, optional): with a **paid** account, a sync downloads each album
+  whose files are all MP3 (or all FLAC) as **one zip** - khinsider's "Download all songs at once" -
+  unpacks it under the app's names and takes it off your "My Mass Downloads" list again. Without an
+  account, for other formats, or once the account can't mass-download any more (a subscription
+  ended), syncs go file by file as before; the app notices that by itself. **Check sign-in** shows
+  whether it works. The password stays on the server and is never sent to the page.
+
 ## [1.0.27] - 2026-10-28
 
 ### Fixed

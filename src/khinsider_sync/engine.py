@@ -6,7 +6,9 @@ import asyncio
 import collections
 import logging
 import os
+import shutil
 import time
+import zipfile
 from collections import deque
 from typing import Optional
 from urllib.parse import unquote, urlsplit
@@ -17,12 +19,13 @@ import httpx
 from .core import browser
 from .core.config import Config
 from .core.constants import RETRY_STATUSES
-from .core.download import Downloader, ResolveError, run_item
+from .core.download import DONE_WORD, Downloader, ResolveError, run_item
 from .core.limits import DownloadGate, RateLimit, _retry_after
-from .core.sync import MANIFEST_NAME, FileInfo, Manifest, size_range, stamp_folders
-from .core.util import CHALLENGE_MESSAGE, fmt_bytes, is_challenge, parse_size, safe_segment
+from .core.sync import MANIFEST_NAME, FileInfo, Manifest, size_range, stamp_file, stamp_folders
+from .core.util import CHALLENGE_MESSAGE, ChallengeError, fmt_bytes, is_challenge, parse_size, safe_segment
 
 from . import __version__, parse
+from . import account as account_mod
 from .catalog import (ALBUM, PLATFORM, SYNCED_WORDS, Catalog, album_plan, album_rank, album_wants,
                       parse_format_setting, parse_formats)
 from .core.constants import AUDIO_EXTENSIONS, BEST_ORDER
@@ -216,6 +219,7 @@ class Engine:
         self.job: Optional[dict] = None
         self.task: Optional[asyncio.Task] = None
         self.scanner: Optional[Scanner] = None
+        self.account = None                            # account.Account of the running sync (album zips)
         self.downloader: Optional[Downloader] = None
         self.gate: Optional[DownloadGate] = None
         self.sync_stats: dict = {}
@@ -382,7 +386,8 @@ class Engine:
             if k == "data_dir" and self.data_locked:
                 continue
             if k in ("interrupted_job", "album_places", "album_formats", "album_upgrades", "last_folder_check",
-                     "queue_resume_at", "challenge_retries", "album_pause_auto", "album_pause_streak"):
+                     "queue_resume_at", "challenge_retries", "album_pause_auto", "album_pause_streak",
+                     "account_cookies", "account_status"):
                 continue
             if k in ("parallel_max", "sync_every_hours", "full_scan_every_days", "check_folder_days",
                      "pages_per_minute", "files_per_hour", "albums_per_day", "albums_per_batch"):
@@ -390,7 +395,12 @@ class Engine:
             if k == "outage_wait_hours":
                 v = max(0.0, float(v or 0))
                 v = int(v) if v == int(v) else v
+            if k in ("account_user", "account_password"):
+                v = str(v or "")
+                if k == "account_password" and not v:
+                    continue                     # empty = keep the saved one (the page never sees it)
             if k in ("resume_interrupted", "album_art", "art_folder", "impersonate", "replace_formats", "player_links",
+                     "account_zips",
                      "playlists", "folder_art", "embed_cover", "write_tags"):
                 v = bool(v)
             if k == "album_pause":
@@ -436,6 +446,16 @@ class Engine:
             _mode, items, _preset = parse_format_setting(clean["formats"])
             if items is not None and ":" in clean["formats"]:   # such a list says itself whether images are saved
                 clean["album_art"] = "art" in items
+        if "account_user" in clean and clean["account_user"].strip() != (s.get("account_user") or "").strip():
+            # another account (or none): forget the old one's password unless a new one came, and its session
+            clean["account_user"] = clean["account_user"].strip()
+            if not clean["account_user"]:
+                clean["account_password"] = ""
+            clean["account_cookies"] = {}
+            clean["account_status"] = {}
+        elif "account_password" in clean:
+            clean["account_cookies"] = {}
+            clean["account_status"] = {}
         moving = [k for k in ("folder_layout", "track_names", "art_folder") if k in clean and clean[k] != s.get(k)]
         self.catalog.save_settings(clean)
         if "pages_per_minute" in clean and clean["pages_per_minute"] != s.get("pages_per_minute"):
@@ -847,7 +867,12 @@ class Engine:
                 remove_empty_dirs(data_dir, left_dirs)
             return todo
 
-        for item in await asyncio.to_thread(plan_all):
+        todo = await asyncio.to_thread(plan_all)
+        if account_mod.configured(s) and todo and not self.stop_requested:
+            # a paid account: whole albums as one zip each; whatever a zip doesn't cover goes file by file
+            kinds = {r[0]: (r[2], r[4]) for r in rows}
+            todo = await self._album_zips(client, s, todo, wants, albums, kinds, dl, manifest, on_done)
+        for item in todo:
             queue.put_nowait(item)
         replaced = [a for a, d in albums.items() if d["changed"] and d["read"]]
         if replaced and not self.stop_requested:
@@ -1359,6 +1384,23 @@ class Engine:
         mime = covers.mime_of(data or b"")
         return (data, mime) if mime else None
 
+    async def check_account(self) -> dict:
+        """Sign in to khinsider now with the account from Settings (the Check button) -> account status."""
+        async with self._client() as client:
+            acct = account_mod.Account(self.catalog, self.base, client)
+            try:
+                await acct.sign_in()
+                st = self.catalog.settings().get("account_status") or {}
+                if st.get("state") not in ("ok", "no_mass"):
+                    acct._status("signed_in", "signed in - whether it may download whole albums shows at the next sync")
+            except ChallengeError:
+                acct._status("failed", "khinsider asked for a browser check - try again in a minute")
+            except (account_mod.AccountError, httpx.HTTPError) as e:
+                acct._status("failed", str(e))
+        s = self.catalog.settings()
+        return dict(s.get("account_status") or {}, configured=account_mod.configured(s),
+                    user=(s.get("account_user") or "").strip())
+
     async def read_album_now(self, slug: str) -> dict:
         """Read one album's page right away (opening an album in the page), outside the job queue."""
         async with self._client() as client:
@@ -1439,6 +1481,123 @@ class Engine:
             return False
         log.info("The last sync didn't finish (the app was closed or stopped) - continuing it")
         return self.start("sync")
+
+    async def _album_zips(self, client, s, todo, wants, albums, kinds, dl, manifest, on_done) -> list:
+        """Albums whose files to fetch are all of one format (MP3 or FLAC, plus images) come as the
+        album's zip from a paid khinsider account (account.py), one album after another: download,
+        unpack under the app's own names, take the album off the account's list. -> the items left
+        for the file-by-file downloads (other formats, files a zip lacks, or no zips any more)."""
+        acct = self.account = account_mod.Account(self.catalog, self.base, client, self.page_rate)
+        by_album: dict = {}
+        for it in todo:
+            by_album.setdefault(kinds[it[0]][0], []).append(it)
+        ids = self.catalog.album_ids(by_album)
+
+        def is_art(it):
+            return kinds[it[0]][1] == "art"
+        names = self.catalog.file_names(it[0] for it in todo)
+        left: list = []
+        done_albums = 0
+        for slug, items in by_album.items():
+            want = wants.get(slug)
+            audio = sorted({it[2].ext for it in items if not is_art(it)} &
+                           (set(want or ()) - {"art"}))
+            fmt = audio[0] if len(audio) == 1 and audio[0] in (".mp3", ".flac") else None
+            if acct.off or self.stop_requested or not fmt or slug not in ids:
+                left += items
+                continue
+            mine = [it for it in items if is_art(it) or it[2].ext == fmt]
+            rest = [it for it in items if it not in mine]
+            try:
+                self.job["phase"] = "downloading album zips"
+                got = await self._one_zip(acct, slug, ids[slug], fmt, mine, names, dl, manifest, on_done)
+            except ChallengeError:
+                acct.off = "khinsider asked for a browser check"
+                got = set()
+            except account_mod.NoMassDownloads as e:
+                acct.off = str(e)
+                log.warning("Your khinsider account can't download whole albums now (%s) - downloading file "
+                            "by file", e)
+                got = set()
+            except (account_mod.AccountError, httpx.HTTPError, OSError, zipfile.BadZipFile) as e:
+                log.warning("Album zip of %s didn't work (%s) - its files come one by one", albums[slug]["name"], e)
+                got = set()
+            if got:
+                done_albums += 1
+            left += [it for it in mine if it[0] not in got] + rest
+        if done_albums:
+            log.info("%d albums came as zips from your khinsider account (%d page requests for them)",
+                     done_albums, acct.requests)
+        self.job["phase"] = "downloading"
+        return left
+
+    async def _one_zip(self, acct, slug, albumid, fmt, items, names, dl, manifest, on_done) -> set:
+        """Download one album zip and unpack the files `items` asks for -> the catalog addresses saved."""
+        zip_url = await acct.album_zip(albumid, fmt, slug)
+        tmp = os.path.join(self.data_dir, ".khinsider-sync-zips")
+        os.makedirs(tmp, exist_ok=True)
+        part = os.path.join(tmp, f"{slug}{'.flac' if fmt == '.flac' else ''}.zip.part")
+        label = f"{slug} ({fmt[1:].upper()} zip)"
+        have = os.path.getsize(part) if os.path.exists(part) else 0
+        headers = {"Range": f"bytes={have}-"} if have else {}
+        async with self.client_stream(dl.client, zip_url, headers) as r:
+            if r.status_code == 416:
+                pass                                     # already complete
+            elif r.status_code not in (200, 206) or "html" in r.headers.get("content-type", ""):
+                raise account_mod.AccountError(f"the zip answered HTTP {r.status_code}")
+            else:
+                total = int(r.headers.get("content-length") or 0) + (have if r.status_code == 206 else 0)
+                # the zip and its unpacked files side by side for a moment, and the free space to keep
+                need = 2 * total + int(parse_size(str(self.catalog.settings().get("min_free") or "0")))
+                if total and shutil.disk_usage(tmp).free < need:
+                    raise account_mod.AccountError(f"not enough free space for its zip ({fmt_bytes(total)})")
+                dl.active[label] = [have if r.status_code == 206 else 0, total]
+                with open(part, "ab" if r.status_code == 206 else "wb") as f:
+                    async for chunk in r.aiter_bytes(256 * 1024):
+                        f.write(chunk)
+                        dl.bytes += len(chunk)
+                        dl.active[label][0] += len(chunk)
+                        if self.stop_requested:
+                            break
+                dl.active.pop(label, None)
+        if self.stop_requested:
+            return set()                                 # the .part stays: resumed next time
+
+        def unpack() -> list:
+            saved = []
+            with zipfile.ZipFile(part) as z:
+                members = {}
+                for m in z.infolist():
+                    if m.is_dir():
+                        continue
+                    base = m.filename.replace("\\", "/").rsplit("/", 1)[-1]
+                    members.setdefault(base, m)
+                    members.setdefault(safe_segment(base), m)
+                for url, rel, info, action, _reason in items:
+                    m = members.get(names.get(url) or "")
+                    if m is None:
+                        continue
+                    dest = dl.dest_of(rel)
+                    dl._make_dirs(os.path.dirname(dest))
+                    with z.open(m) as src, open(dest + ".part", "wb") as out:
+                        shutil.copyfileobj(src, out, 1024 * 1024)
+                    os.replace(dest + ".part", dest)
+                    stamp_file(dest, info, None)
+                    dl._set_mode(dest)
+                    manifest.done(rel, url, m.file_size, None, None, info)
+                    saved.append((url, rel, DONE_WORD.get(action, "new"), m.file_size))
+            return saved
+        saved = await asyncio.to_thread(unpack)
+        manifest.commit()
+        for url, rel, word, size in saved:
+            on_done(url, rel, word, size)
+        os.remove(part)
+        await acct.remove(albumid)
+        return {u for u, *_ in saved}
+
+    @staticmethod
+    def client_stream(client, url, headers):
+        return client.stream("GET", url, headers=headers, timeout=httpx.Timeout(60.0, connect=15.0))
 
     def pause_seconds(self, s: Optional[dict] = None) -> float:
         """The pause between albums: setting `album_pause` - "auto" (what the app has learned,
@@ -1578,6 +1737,8 @@ class Engine:
             "next_run": self.next_run,
             "queue_resume_at": float(s.get("queue_resume_at") or 0) or None,
             "challenge_retries": int(s.get("challenge_retries") or 0),
+            "account": dict(s.get("account_status") or {}, configured=account_mod.configured(s),
+                            user=(s.get("account_user") or "").strip()),
             "limits": {k: int(s.get(k) or 0) for k in ("pages_per_minute", "files_per_hour", "albums_per_day")},
             "leftovers": self.leftovers,
             "data_dir": s["data_dir"],

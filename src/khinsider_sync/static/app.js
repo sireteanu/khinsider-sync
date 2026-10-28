@@ -932,6 +932,33 @@ $("#btn-clear-sel").addEventListener("click", async () => {
 
 /* ---------------------------------------------------------------- settings */
 const form = $("#settings-form");
+
+/* the khinsider account's state, under its fields in Settings */
+function showAccount(a) {
+  const words = {
+    ok: "Signed in - album zips available",
+    no_mass: "Signed in, but this account can't download whole albums now - syncs go file by file",
+    signed_in: "Signed in",
+    failed: "Not signed in",
+  };
+  let t = !a || !a.configured ? "No account - syncs go file by file" : words[a.state] || "Not checked yet";
+  if (a && a.message && a.state !== "ok") t += ` (${a.message})`;
+  if (a && a.at) t += ` - ${new Date(a.at * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}`;
+  $("#account-state").textContent = t;
+}
+$("#account-check").addEventListener("click", async () => {
+  $("#account-state").textContent = "Signing in…";
+  try {
+    // the fields as they are now: saved first, so the check uses what's typed
+    const body = { account_user: form.account_user.value.trim(), account_zips: form.account_zips.checked };
+    if (form.account_password.value) body.account_password = form.account_password.value;
+    await api("/api/settings", { method: "POST", body });
+    form.account_password.value = "";
+    showAccount(await api("/api/account/check", { method: "POST", body: {} }));
+  } catch (err) {
+    $("#account-state").textContent = String(err.message || err);
+  }
+});
 function syncFields() {
   $("#par-label").textContent = form.parallel_mode.value === "auto" ? "Upper limit" : "Number of downloads";
 }
@@ -1036,6 +1063,11 @@ $("#btn-settings").addEventListener("click", async () => {
   $("#notify-result").textContent = "";
   form.track_names.value = s.track_names || "site";
   form.impersonate.checked = s.impersonate !== false;
+  form.account_user.value = s.account_user || "";
+  form.account_password.value = "";
+  form.account_password.placeholder = s.account_password_set ? "saved - type to change" : "";
+  form.account_zips.checked = s.account_zips !== false;
+  showAccount(Object.assign({}, s.account_status || {}, { configured: !!(s.account_user && s.account_password_set) }));
   form.player_links.checked = s.player_links !== false;
   const box = $("#types-list");
   box.innerHTML = "";
@@ -1133,6 +1165,8 @@ $("#settings-save").addEventListener("click", async (e) => {
     track_names: form.track_names.value,
     impersonate: form.impersonate.checked,
     player_links: form.player_links.checked,
+    account_user: form.account_user.value.trim(),
+    account_zips: form.account_zips.checked,
     platform_types: [...document.querySelectorAll("#types-list input:checked")].map((i) => i.value),
     parallel: auto ? "auto" : form.parallel_n.value,
     max_rate: form.max_rate.value.trim(),
@@ -1150,6 +1184,7 @@ $("#settings-save").addEventListener("click", async (e) => {
     resume_interrupted: form.resume_interrupted.checked,
   };
   if (auto) body.parallel_max = form.parallel_n.value || 8;
+  if (form.account_password.value) body.account_password = form.account_password.value;
   if (fmtDirty) body.formats = fmtString();      // untouched: keep the setting as it is
   if (!form.data_dir.readOnly) body.data_dir = form.data_dir.value.trim();
   try {

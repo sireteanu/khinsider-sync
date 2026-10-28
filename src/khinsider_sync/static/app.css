@@ -163,6 +163,7 @@ h2 { font-size: 15px; font-weight: 600; }
 .unit { display: flex; gap: 6px; align-items: center; }
 .unit input { width: 90px; }
 .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.row-inline { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 6px 0; }
 .check { display: flex; gap: 8px; align-items: flex-start; margin: 6px 0; font-size: 13px; }
 .check input { accent-color: var(--grape-ink); margin-top: 3px; }
 .files-wrap { max-height: 60vh; overflow: auto; }

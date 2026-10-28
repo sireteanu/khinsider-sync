@@ -194,6 +194,11 @@ class MockSite:
         self.robots_extra = ""             # more robots.txt lines
         self.broken_images: set = set()    # image names that answer 404 (listed on the page, file gone)
         self.player = True                 # album pages carry the music player's packed track list
+        # khinsider accounts: {login: (password, paid)}; paid ones may download whole albums as zips
+        self.accounts: dict = {}
+        self.sessions: dict = {}           # xf_user cookie value -> login
+        self.mass: dict = {}               # login -> {albumid: slug} on "My Mass Downloads"
+        self.zip_broken: set = set()       # albums whose zip answers 404
         self.player_broken: set = set()    # albums whose player addresses are wrong (403 from the files)
         self.requests: list = []           # (path, headers dict)
         self._lock = threading.Lock()
@@ -262,7 +267,56 @@ class MockSite:
                     return self._send(200, site.album_page(slug))
                 if path == "/":
                     num = int((up.parse_qs(u.query).get("page") or ["1"])[0])
-                    return self._send(200, site.latest(num))
+                    body = site.latest(num)
+                    if site.user_of(self.headers):
+                        body = body.replace("</body>", '<a href="/logging/logout">Log Out</a></body>')
+                    return self._send(200, body)
+                if path == "/forums/login":
+                    return self._send(200, site.login_page())
+                if path.startswith("/cp/"):
+                    return self._cp(path, up.parse_qs(u.query))
+                return self._send(404, page("Not found", "<h2>Ooops!</h2>"))
+
+            def do_POST(self):  # noqa: N802
+                u = up.urlparse(self.path)
+                body = self.rfile.read(int(self.headers.get("Content-Length") or 0)).decode()
+                with site._lock:
+                    site.requests.append((self.path, {k.title(): v for k, v in self.headers.items()}))
+                if site.challenge:
+                    return self._send(403, "<title>Just a moment...</title>",
+                                      extra=[("cf-mitigated", "challenge"), ("Server", "cloudflare")])
+                if u.path == "/forums/index.php" and u.query == "login/login":
+                    form = {k: v[0] for k, v in up.parse_qs(body).items()}
+                    acct = site.accounts.get(form.get("login", ""))
+                    if form.get("_xfToken") != site.XF_TOKEN or not acct or acct[0] != form.get("password"):
+                        return self._send(200, site.login_page(error="Incorrect password. Please try again."))
+                    tok = hashlib.sha1(f"{form['login']}{time.time()}".encode()).hexdigest()[:20]
+                    site.sessions[tok] = form["login"]
+                    loc = up.urlparse(form.get("_xfRedirect") or "/").path or "/"
+                    return self._send(303, "", extra=[("Location", loc),
+                                                      ("Set-Cookie", f"xf_user={tok}; path=/; httponly")])
+                return self._send(404, "")
+
+            def _cp(self, path, q):
+                user = site.user_of(self.headers)
+                if user is None:
+                    return self._send(200, site.please_log_in())
+                if path.startswith("/cp/add_album/"):
+                    aid = int(path.rsplit("/", 1)[-1])
+                    slug = next((s for s in site.albums if site.albumid(s) == aid), None)
+                    if slug is None:
+                        return self._send(200, page("Mass Download", "<p>Album not found.</p>"))
+                    if not site.accounts[user][1]:
+                        return self._send(200, page("Mass Download", '<p align="center">To download albums in full, '
+                                                    'you need to give back something to the site.</p>'))
+                    site.mass.setdefault(user, {})[aid] = slug
+                    return self._send(200, site.add_album_page(slug))
+                if path == "/cp/downloads":
+                    return self._send(200, site.mass_list(user))
+                if path == "/cp/downloads_delete_album":
+                    aid = int((q.get("albumid") or ["0"])[0])
+                    gone = site.mass.get(user, {}).pop(aid, None)
+                    return self._send(200, "Success" if gone else "Failure - album not found!")
                 return self._send(404, page("Not found", "<h2>Ooops!</h2>"))
 
             def _limit_page(self):
@@ -280,6 +334,11 @@ class MockSite:
                 if len(parts) != 3:
                     return self._send(404, "")
                 slug, token, name = parts
+                if name.lower().endswith(".zip"):                     # a paid account's album zip
+                    data = site.album_zip(slug, name) if token == site.token(slug) else None
+                    if data is None or slug in site.zip_broken:
+                        return self._send(404, "<html><body>Not Found</body></html>")
+                    return self._serve_bytes(data, "application/zip")
                 if token != site.token(slug) or not site.has_file(slug, name):
                     return self._send(403, "<html><body>Forbidden</body></html>")
                 if name.startswith("03. Broken"):
@@ -304,6 +363,18 @@ class MockSite:
                     if not self._counted:
                         with site._lock:
                             site.active -= 1
+
+            def _serve_bytes(self, data, ctype):
+                start = 0
+                rng = self.headers.get("Range")
+                if rng:
+                    start = int(rng.split("=")[1].split("-")[0])
+                    if start >= len(data):
+                        return self._head(416, "text/plain", 0)
+                    self._head(206, ctype, len(data) - start, [("Content-Range", f"bytes {start}-{len(data) - 1}/{len(data)}")])
+                else:
+                    self._head(200, ctype, len(data))
+                self.wfile.write(data[start:])
 
             def _serve(self, slug, name):
                 data = site.content(slug, name)
@@ -561,13 +632,96 @@ class MockSite:
                                                                for f in a["formats"])
                 + '   <th align="right" colspan="2">&nbsp;</th>\n</tr>\n')
         content = (f'<h2>{html.escape(a["name"])}</h2>\n{info}<table><tbody><tr><td>{imgs}\n    </td></tr></tbody></table>\n'
-                   f'<p></p>\n<div class="albumMassDownload"><a href="/cp/add_album/1">x</a><div> Download all songs at '
+                   f'<p></p>\n<div class="albumMassDownload"><a href="/cp/add_album/{self.albumid(slug)}">x</a><div> Download all songs at '
                    f'once: <a href="/cp/add_album/1">click to download</a></div>\n</div>\n<div id="nowPlay"></div>\n'
                    f'<div id="audiowrap"></div>\n<table id="songlist">\n<tbody><tr id="songlist_header">\n{th}</tr>\n'
                    f'{rows}{foot}</tbody></table>\n{self.player_script(slug)}<h2>Description</h2><p>Some text.</p>\n'
                    f'<h2>People who viewed this also viewed</h2><table><tbody><tr><td class="albumIconLarge">'
                    f'<a href="/game-soundtracks/album/sonic-the-hedgehog-genesis"><p>Sonic</p></a></td></tr></tbody></table>')
         return page(f"{a['name']} MP3 - Download Soundtracks for FREE!", content)
+
+    # ---- khinsider accounts (tests/fixtures/forum_login.html, cp_*.html) ----
+    XF_TOKEN = "1793220188,0123456789abcdef0123456789abcdef"
+
+    def user_of(self, headers):
+        for part in (headers.get("Cookie") or "").split(";"):
+            k, _, v = part.strip().partition("=")
+            if k == "xf_user" and v in self.sessions:
+                return self.sessions[v]
+        return None
+
+    @staticmethod
+    def albumid(slug: str) -> int:
+        return 100_000 + int(hashlib.sha1(slug.encode()).hexdigest()[:6], 16) % 900_000
+
+    def login_page(self, error: str = "") -> str:
+        err = f'<div class="blockMessage blockMessage--error">{error}</div>' if error else ""
+        return (f'<!DOCTYPE html><html><head><title>Log in | KHInsider.com Video Game Music</title></head><body>{err}'
+                f'<form action="/forums/index.php?login/login" method="post" class="block"> <input type="hidden" '
+                f'name="_xfToken" value="{self.XF_TOKEN}"> <input type="text" class="input" name="login"> '
+                f'<input type="password" name="password" value="" class="input"> <input type="checkbox" '
+                f'name="remember" value="1" checked="checked"> <input type="hidden" name="_xfRedirect" '
+                f'value="{self.url}/faq"> <button type="submit" class="button">Log in</button></form>'
+                f'<a href="/forums/login">Log In</a></body></html>')
+
+    def please_log_in(self) -> str:
+        return ('<!DOCTYPE html><html><head><title>Please Log In</title></head><body><div id="pageContent">'
+                '<div class="page"> <p align="center">To access the website\'s features, you need to be registered '
+                'and logged in. <br><a href="/forums/login">Click here to log in</a></p></div></div></body></html>')
+
+    def zip_name(self, slug: str, flac: bool = False) -> str:
+        a = self.albums[slug]
+        return f"{a['name']} ({a['year']}){' (FLAC)' if flac else ''}.zip"
+
+    def zip_url(self, slug: str, flac: bool = False) -> str:
+        return f"{self.url}/soundtracks/{slug}/{self.token(slug)}/{up.quote(self.zip_name(slug, flac))}"
+
+    def add_album_page(self, slug: str) -> str:
+        return ('<!DOCTYPE html><html><head><title>Mass Download</title></head><body><div id="pageContent">'
+                '<p align="center">Your download is ready, and has been added to your mass download list. You will be '
+                f'able to download it at any time from now on.</p> <p align="center"><a href="{self.zip_url(slug)}">'
+                'Click here to download now!</a></p> </div><a href="/logging/logout">Log Out</a></body></html>')
+
+    def mass_list(self, user: str) -> str:
+        rows = ""
+        for aid, slug in sorted(self.mass.get(user, {}).items()):
+            a = self.albums[slug]
+            links = f'<a href="{self.zip_url(slug)}">MP3</a>\n'
+            if "FLAC" in a["formats"]:
+                links += f'\t\t&nbsp;/&nbsp;<a href="{self.zip_url(slug, True)}">FLAC</a>'
+            rows += (f'\t<tr>\n\t\t<td class="albumIcon"><a href="/game-soundtracks/album/{slug}"><img src=""></a></td>\n'
+                     f'\t\t<td><a href="/game-soundtracks/album/{slug}">{html.escape(a["name"])}</a></td>\n'
+                     f'\t \t<td style="text-align: center; width: 100px;">{links}</td>\n\t \t<td>2026-10-28</td>\n'
+                     f'\t \t<td><a href="{self.url}/soundtracks/{slug}/khinsider.info.txt">info</a></td>\n'
+                     f'\t \t<td><i class="material-icons albumDelete" albumid="{aid}">delete_forever</i></td>\n\t</tr>\n')
+        return ('<!DOCTYPE html><html><head><title>My Downloads - Video Game Music</title></head><body>'
+                '<div id="pageContent"><table id="top40" class="albumList"><tbody><tr><th></th><th>Album</th>'
+                f'<th>Download</th><th>Added</th><th>Info</th><th>Delete</th></tr>\n{rows}</tbody></table></div>'
+                '<a href="/logging/logout">Log Out</a></body></html>')
+
+    def album_zip(self, slug: str, name: str):
+        """The album zip as khinsider packs it: khinsider.info.txt, the tracks of one format under
+        their names and the images, all at the top."""
+        import io
+        import zipfile
+        a = self.albums.get(slug)
+        if a is None:
+            return None
+        flac = name == self.zip_name(slug, True)
+        if not flac and name != self.zip_name(slug):
+            return None
+        fmt = "FLAC" if flac else "MP3"
+        if fmt not in a["formats"]:
+            return None
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+            z.writestr("khinsider.info.txt", f"Name: {a['name']}\n")
+            for _disc, _num, stem, _title, _dur in a["tracks"]:
+                if fmt in self.track_formats(a, stem):
+                    z.writestr(f"{stem}.{fmt.lower()}", self.content(slug, f"{stem}.{fmt.lower()}"))
+            for img in a["images"]:
+                z.writestr(img, self.content(slug, img))
+        return buf.getvalue()
 
     @staticmethod
     def songid(slug: str, stem: str) -> str:
