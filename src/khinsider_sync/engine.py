@@ -6,6 +6,7 @@ import asyncio
 import collections
 import logging
 import os
+import re
 import shutil
 import time
 import zipfile
@@ -78,6 +79,9 @@ def parse_mode(value) -> str:
     return digits.rjust(3, "0")
 
 
+_OWN_NUMBER = re.compile(r"\s*(\d{1,3})(\s*[.)\-_]\s*|\s+)")
+
+
 def track_name(f: dict) -> str:
     """'01 - Title.mp3', or '1-01 - Title.flac' on a multi-disc album (khi-explorer's naming), from
     the album page's CD and # columns; without a # column the track's place in the list counts.
@@ -92,13 +96,21 @@ def track_name(f: dict) -> str:
     if not num:
         num = str((f.get("pos") or 0) // 100 + 1)
     num = num.zfill(2) if num.isdigit() else num
+    # many titles start with their own track number ("01 Title", "3. Title"): don't write it twice.
+    # A single digit followed only by a space stays ("2 Become 1" is a title, not a number)
+    m = _OWN_NUMBER.match(title)
+    if m and num.isdigit() and int(m.group(1)) == int(num) and title[m.end():].strip() \
+            and (len(m.group(1)) == 2 or m.group(2).strip()):
+        title = title[m.end():].strip()
     disc = (f.get("disc") or "").strip()
     number = f"{disc}-{num}" if disc else num
     return safe_segment(f"{number} - {title}{f['ext']}")
 
 
+SUMMARY_EVERY = 1800     # a long queue sums up its rounds in the log this often (and at its end)
+LEFTOVER_EVERY = 1800    # during a long queue, the download folder is checked for leftovers this often
 COVER_RETRY = 86400      # an album whose cover couldn't be loaded: the next try a day later
-READ_BATCH = 1           # default of albums_per_batch: album pages a sync reads before downloading them
+READ_BATCH = 10          # default of albums_per_batch: album pages a sync reads before downloading them
 
 
 def file_intact(root: str, rel: str, size: Optional[int]) -> bool:
@@ -207,6 +219,9 @@ class Engine:
         self.config_dir = config_dir
         self.base = base_url if base_url.endswith("/") else base_url + "/"
         self.solve_state = solver.SolveState()   # FlareSolverr's cookie + User-Agent, kept between jobs
+        self._leftovers_at = 0.0                 # the last leftover check during a sync
+        self._round = 0                          # rounds of the queue in this job (albums_per_batch)
+        self._pace: deque = deque(maxlen=400)    # (time, albums not read yet) at each round: the queue's pace
         self._cover_failed: dict = {}            # album slug -> when its cover couldn't be loaded (retry daily)
         self.catalog = Catalog(os.path.join(config_dir, "catalog.db"))
         self.data_locked = data_locked
@@ -394,7 +409,7 @@ class Engine:
             if k == "data_dir" and self.data_locked:
                 continue
             if k in ("interrupted_job", "album_places", "album_formats", "album_upgrades", "last_folder_check",
-                     "queue_resume_at", "challenge_retries", "album_pause_auto", "album_pause_streak",
+                     "queue_resume_at", "challenge_retries", "account_tidy",
                      "account_cookies", "account_status"):
                 continue
             if k in ("parallel_max", "sync_every_hours", "full_scan_every_days", "check_folder_days",
@@ -411,15 +426,6 @@ class Engine:
                      "account_zips",
                      "playlists", "folder_art", "embed_cover", "write_tags"):
                 v = bool(v)
-            if k == "account_mode" and v not in ("zip", "queue"):
-                raise ValueError("account mode must be zip or queue")
-            if k == "album_pause":
-                v = str(v if v is not None else "auto").strip().lower() or "auto"
-                if v != "auto":
-                    try:
-                        v = str(max(0, int(float(v))))
-                    except ValueError:
-                        raise ValueError("the pause between albums must be auto or a number of seconds")
             if k == "notify_url":
                 v = str(v or "").strip()
                 from .notify import valid
@@ -584,6 +590,7 @@ class Engine:
     async def _run(self, kind: str, albums: Optional[list]) -> None:
         started = time.time()
         summary: dict = {}
+        self._round = 0
         try:
             s = self.catalog.settings()
             self.page_rate = PageRate(float(s.get("pages_per_minute") or 0))
@@ -626,19 +633,22 @@ class Engine:
                     if kind == "list" and not self.stop_requested:
                         summary["sync"] = await self._from_account_list(client, robots)
                     if kind in ("sync", "scan+sync", "quick+sync") and not self.stop_requested:
+                        self._round = 1
                         summary["sync"] = await self._sync(client, robots, albums if kind == "sync" else None)
+                        said = time.time()
                         # a long list goes a batch at a time (albums_per_batch): go straight on with the
                         # next one in this job - no gap between albums, one notification at the end
                         while (not self.stop_requested and (summary["sync"].get("next_batch") or 0)
                                and 0 < (summary["sync"].get("resume_at") or 0) <= time.time() + 1):
-                            # a quiet spell after an album's downloads: right after a burst of files the
-                            # next album page got the browser check, a minute later it went through
-                            waited = await self._album_pause(summary["sync"])
-                            if self.stop_requested:
-                                break
+                            self._round += 1
                             more = await self._sync(client, robots, None)
                             summary["sync"] = _add_runs(summary["sync"], more)
-                            self._learn_pause(waited, bool(more.get("challenged")))
+                            if time.time() - said >= SUMMARY_EVERY:
+                                self._queue_summary(summary["sync"], started)
+                                said = time.time()
+                        if self._round > 1:
+                            self._queue_summary(summary["sync"], started,
+                                                final=not summary["sync"].get("next_batch"))
                         # a browser check: wait and try again by itself, longer each time in a row
                         if summary["sync"].get("challenged") and not self.stop_requested:
                             got = any(summary["sync"].get(k) for k in ("new", "updated", "resumed"))
@@ -646,6 +656,13 @@ class Engine:
                         elif int(self.catalog.settings().get("challenge_retries") or 0):
                             self.catalog.save_settings({"challenge_retries": 0})
                             log.info("khinsider lets this network read its pages again")
+                    # the queue is through (nothing waits, no check): take saved albums off the khinsider
+                    # list now - during the queue those page reads would slow every album down
+                    if (kind in ("sync", "scan+sync", "quick+sync", "list") and not self.stop_requested
+                            and not (summary.get("sync") or {}).get("challenged")
+                            and not (summary.get("sync") or {}).get("next_batch")
+                            and not float(self.catalog.settings().get("queue_resume_at") or 0)):
+                        await self._tidy_list(client)
             self.job["phase"] = "stopped" if self.stop_requested else "done"
             if self.scanner is not None and self.scanner.challenged and "browser check" not in (self.job.get("message") or ""):
                 self.job["message"] = "khinsider asks for a browser check (Cloudflare) - see the log"
@@ -753,6 +770,8 @@ class Engine:
         # a long list is done in batches: read a few album pages, download those albums, carry on -
         # never thousands of pages up front (that's what gets a connection challenged)
         later: list = []
+        if unread and not only:
+            self._pace.append((time.time(), len(unread)))
         batch = max(1, int(s.get("albums_per_batch") or READ_BATCH))
         if len(unread) > batch and not only:
             unread.sort(key=lambda a: (albums[a]["name"] or a).casefold())
@@ -761,13 +780,14 @@ class Engine:
             skip = set(later)
             slugs = [a for a in slugs if a not in skip]
             albums = {a: d for a, d in albums.items() if a not in skip}
-            log.info("%d ticked albums haven't been read yet: this sync does %d of them, then carries on "
+            self._note("%d ticked albums haven't been read yet: this sync does %d of them, then carries on "
                      "with the next ones by itself", len(unread) + len(later), len(unread))
         if unread:
             self.job["phase"] = "reading album pages"
-            log.info("Reading %d album pages first", len(unread))
+            self._note("Reading %d album pages first", len(unread))
             sc = self._scanner(client, robots)
             sc.workers = 1                       # one page at a time, never a burst
+            sc.quiet = self._round > 1
             res = await sc.read_albums(unread, "album pages")
             if self.stop_requested:
                 return {}
@@ -783,7 +803,7 @@ class Engine:
         done = {a for a, d in albums.items()
                 if d["read"] and not d["changed"] and self.catalog.album_totals(a, d["formats"], s)["downloaded"]}
         if done:
-            log.info("%d ticked albums are already downloaded - skipped", len(done))
+            self._note("%d ticked albums are already downloaded - skipped", len(done))
         albums = {a: d for a, d in albums.items() if a not in done}
         # each album's files in the order of its formats setting: with "FLAC, then MP3", every
         # FLAC file of the sync is queued before the first MP3 file, album by album within that
@@ -912,7 +932,7 @@ class Engine:
         self.catalog.commit()
         if moved[0]:
             log.info("Moved %d files to their new place in the download folder", moved[0])
-        log.info("Sync: %d albums, %d files, %d to download (about %s), %d already up to date",
+        self._note("Sync: %d albums, %d files, %d to download (about %s), %d already up to date",
                  len(albums), st["total"], st["to_fetch"], fmt_bytes(st["bytes_planned"]),
                  st["up to date"] + st["already in folder"])
         self.job["phase"] = "downloading"
@@ -969,7 +989,7 @@ class Engine:
             if dl.touched_dirs:
                 n = await asyncio.to_thread(stamp_folders, list(dl.touched_dirs), data_dir)
                 if n:
-                    log.info("Dated %d folders to their newest file", n)
+                    self._note("Dated %d folders to their newest file", n)
             if not self.stop_requested:
                 manifest.commit()
                 self.catalog.commit()
@@ -979,8 +999,11 @@ class Engine:
                 finished = self._finished_albums()      # worked out once for the steps below
                 await self._write_extras(client, finished, recheck={a for a in got if a})
                 await self._tag_files(client, manifest, finished)
-                if not dl.paused:
+                # the walk over the whole download folder: at the end of the queue, or every half hour
+                # during a long one - not after every round (it gets slower as the folder grows)
+                if not dl.paused and (not later or time.time() - self._leftovers_at >= LEFTOVER_EVERY):
                     await self._check_leftovers()
+                    self._leftovers_at = time.time()
             best = self.gate.remembered_max()
             if best:
                 manifest.set_meta(key, best)
@@ -995,7 +1018,7 @@ class Engine:
         summary["track_pages"] = resolver.requests
         summary["player_files"] = resolver.direct_used - resolver.direct_failed
         if resolver.direct_used:
-            log.info("%d files came with the address from their album page's player (no track page needed)%s",
+            self._note("%d files came with the address from their album page's player (no track page needed)%s",
                      resolver.direct_used - resolver.direct_failed,
                      f"; {resolver.direct_failed} needed their track page after all" if resolver.direct_failed else "")
         # carry on by itself when a limit stopped this sync (not when you pressed Stop)
@@ -1283,7 +1306,7 @@ class Engine:
                 await asyncio.to_thread(remove_empty_dirs, self.data_dir, dirs)
             if written or removed:
                 kinds = collections.Counter(want[r][1] for r in written)
-                log.info("Playlists and folder images: %d playlists and %d folder images written, %d removed",
+                self._note("Playlists and folder images: %d playlists and %d folder images written, %d removed",
                          kinds.get("playlist", 0), kinds.get("folder_art", 0), len(removed))
         except Exception as e:
             log.warning("Could not write the playlists / folder images: %r", e)
@@ -1390,7 +1413,7 @@ class Engine:
                              f"({counts['tags had']} were complete)")
             extra = "".join(f", {n} {k}" for k, n in counts.items()
                             if k not in ("cover added", "cover had", "tags added", "tags had") and n)
-            log.info("Music files: %s%s", "; ".join(parts), extra)
+            self._note("Music files: %s%s", "; ".join(parts), extra)
         except Exception as e:
             log.warning("Could not put covers / tags into the music files: %r", e)
 
@@ -1572,12 +1595,11 @@ class Engine:
     async def _album_zips(self, client, s, todo, wants, albums, kinds, dl, manifest, on_done) -> list:
         """Albums whose files to fetch are all of one format (MP3 or FLAC, plus images) come as the
         album's zip from a paid khinsider account (account.py), one album after another: download,
-        unpack under the app's own names, take the album off the account's list. -> the items left
+        unpack under the app's own names; taking it off the account's list waits for the end of the
+        queue (`_tidy_list`). -> the items left
         for the file-by-file downloads (other formats, files a zip lacks, or no zips any more)."""
         acct = self.account = account_mod.Account(self.catalog, self.base, client, self.page_rate,
                                                   listed=self._job_list)
-        # "queue": a sync only puts albums on the account's list - "Download my khinsider list" fetches them
-        queue_only = s.get("account_mode") == "queue" and not self._from_list
         try:
             self._job_list = await acct.mass_list()      # once a job: albums on it need no add_album
         except ChallengeError:
@@ -1594,7 +1616,7 @@ class Engine:
             return kinds[it[0]][1] == "art"
         names = self.catalog.file_names(it[0] for it in todo)
         left: list = []
-        done_albums = queued = 0
+        done_albums = 0
         for slug, items in by_album.items():
             want = wants.get(slug)
             audio = sorted({it[2].ext for it in items if not is_art(it)} &
@@ -1606,13 +1628,6 @@ class Engine:
             mine = [it for it in items if is_art(it) or it[2].ext == fmt]
             rest = [it for it in items if it not in mine]
             try:
-                if queue_only:
-                    if slug not in acct.listed:
-                        self.job["phase"] = "adding albums to your khinsider list"
-                        await acct.queue(ids[slug], slug)
-                        queued += 1
-                    left += rest                         # the zip's files wait for "Download my list"
-                    continue
                 self.job["phase"] = "downloading album zips"
                 got = await self._one_zip(acct, slug, ids[slug], fmt, mine, names, dl, manifest, on_done)
             except ChallengeError:
@@ -1630,10 +1645,8 @@ class Engine:
                 done_albums += 1
             left += [it for it in mine if it[0] not in got] + rest
         if done_albums:
-            log.info("%d albums came as zips from your khinsider account (%d page requests for them)",
+            self._note("%d albums came as zips from your khinsider account (%d page requests for them)",
                      done_albums, acct.requests)
-        if queued:
-            log.info("%d albums added to your khinsider list - \"Download my khinsider list\" fetches them", queued)
         self.job["phase"] = "downloading"
         return left
 
@@ -1706,69 +1719,42 @@ class Engine:
         for url, rel, word, size in saved:
             on_done(url, rel, word, size)
         os.remove(part)
-        await acct.remove(albumid, slug)
+        # taken off the khinsider list later (`_tidy_list`): one page read each, not in the busy queue
+        tidy = list(self.catalog.settings().get("account_tidy") or [])
+        if albumid not in tidy:
+            self.catalog.save_settings({"account_tidy": tidy + [albumid]})
         return {u for u, *_ in saved}
+
+    async def _tidy_list(self, client) -> int:
+        """Take the albums saved from zips off the account's "My Mass Downloads" list - after the queue,
+        paced like every page read (khinsider has no way to remove several at once)."""
+        s = self.catalog.settings()
+        ids = [int(a) for a in (s.get("account_tidy") or [])]
+        if not ids or not account_mod.configured(s):
+            return 0
+        acct = account_mod.Account(self.catalog, self.base, client, self.page_rate, listed=self._job_list)
+        self.job["phase"] = "tidying up your khinsider list"
+        done = 0
+        try:
+            for aid in ids:
+                if self.stop_requested:
+                    break
+                await acct.remove(aid)
+                done += 1
+        except ChallengeError:
+            log.info("khinsider asked for a browser check while tidying up your list - the rest waits for "
+                     "the next sync")
+        finally:
+            left = [a for a in (self.catalog.settings().get("account_tidy") or []) if int(a) not in set(ids[:done])]
+            self.catalog.save_settings({"account_tidy": left})
+        if done:
+            log.info("Took %d downloaded albums off your khinsider list%s", done,
+                     f" ({len(left)} left for the next sync)" if left else "")
+        return done
 
     @staticmethod
     def client_stream(client, url, headers):
         return client.stream("GET", url, headers=headers, timeout=httpx.Timeout(60.0, connect=15.0))
-
-    def pause_seconds(self, s: Optional[dict] = None) -> float:
-        """The pause between albums: setting `album_pause` - "auto" (what the app has learned,
-        `album_pause_auto`) or seconds (0 = none)."""
-        s = s or self.catalog.settings()
-        v = str(s.get("album_pause", "auto")).strip().lower()
-        if v == "auto":
-            learned = s.get("album_pause_auto")
-            return float(PAUSE_START if learned is None or learned == "" else learned)
-        try:
-            return max(0.0, float(v))
-        except ValueError:
-            return float(PAUSE_START)
-
-    async def _album_pause(self, last: dict) -> float:
-        """Wait the pause between albums when the last batch downloaded anything (-> seconds waited)."""
-        if not (last.get("bytes") or 0):
-            return 0.0
-        secs = self.pause_seconds()
-        if secs <= 0:
-            return 0.0
-        self.job["phase"] = "pausing between albums"
-        self.job["pause_until"] = time.time() + secs
-        log.debug("Pausing %.0f s before the next album", secs)
-        end = time.monotonic() + secs
-        while not self.stop_requested and time.monotonic() < end:
-            await asyncio.sleep(min(1.0, end - time.monotonic()))
-        self.job.pop("pause_until", None)
-        return secs
-
-    def _learn_pause(self, waited: float, challenged: bool) -> None:
-        """Automatic pause: a browser check right after it -> longer (by half, at most 5 min) - and still
-        one after 5 min: no pause any more (it doesn't help); 20 albums in a row without one -> 10 s
-        shorter (at least 20 s)."""
-        s = self.catalog.settings()
-        if not waited or str(s.get("album_pause", "auto")).strip().lower() != "auto":
-            return
-        cur = float(s.get("album_pause_auto") if s.get("album_pause_auto") not in (None, "") else PAUSE_START)
-        if challenged and cur >= PAUSE_MAX:
-            # the check comes even after the longest pause: pausing doesn't keep it away here
-            self.catalog.save_settings({"album_pause_auto": 0, "album_pause_streak": 0})
-            log.info("The browser check came even after a %.0f s pause - pausing doesn't help on this "
-                     "connection, so no pause between albums from now on", cur)
-            return
-        if challenged:
-            new = min(PAUSE_MAX, max(cur + 15, cur * 1.5))
-            self.catalog.save_settings({"album_pause_auto": round(new), "album_pause_streak": 0})
-            log.info("The browser check came even after a %.0f s pause - pausing %.0f s between albums from now on",
-                     cur, new)
-            return
-        streak = int(s.get("album_pause_streak") or 0) + 1
-        if streak >= PAUSE_EASE_AFTER and cur > PAUSE_MIN:
-            new = max(PAUSE_MIN, cur - 10)
-            self.catalog.save_settings({"album_pause_auto": round(new), "album_pause_streak": 0})
-            log.info("%d albums without a browser check - pausing %.0f s between albums now", streak, new)
-        else:
-            self.catalog.save_settings({"album_pause_streak": streak})
 
     def _challenge_backoff(self, fresh: bool = False) -> None:
         """khinsider's Cloudflare asked for a browser check: no more requests for a while, then the
@@ -1838,6 +1824,48 @@ class Engine:
         self._sel_cache = (key, dict(sel))
         return sel
 
+    def _queue_status(self) -> Optional[dict]:
+        """The ticked albums still to download and, while the queue runs, roughly how long they'll take."""
+        sel = self.selection()
+        left = max(0, sel["albums"] - sel["downloaded"])
+        if not left:
+            return None
+        pace = self.queue_pace()
+        going = self.busy or bool(float(self.catalog.settings().get("queue_resume_at") or 0))
+        return {"albums_left": left, "per_album": round(1 / pace, 1) if pace else None,
+                "eta": round(left / pace) if pace and going else None}
+
+    def _note(self, msg: str, *args) -> None:
+        """Housekeeping lines of a round (albums read, folders dated, covers ...): in the log for the first
+        round of a job; later rounds of a long queue put them at debug level - `_queue_summary` sums up."""
+        log.log(logging.DEBUG if self._round > 1 else logging.INFO, msg, *args)
+
+    def _queue_summary(self, sync: dict, started: float, final: bool = False) -> None:
+        q = self._queue_status() or {}
+        log.info("Queue %s: %d rounds, %d albums, %d files new, %d updated, %d failed, %s in %s%s",
+                 "done" if final else "so far", sync.get("batches") or 1, len(sync.get("got_albums") or []),
+                 sync.get("new") or 0, sync.get("updated") or 0, sync.get("failed") or 0,
+                 fmt_bytes(sync.get("bytes") or 0), _span(time.time() - started),
+                 f" - {q['albums_left']:,} albums to go" + (f", about {_span(q['eta'])} at this pace" if q.get("eta") else "")
+                 if q.get("albums_left") else "")
+
+    def queue_pace(self) -> Optional[float]:
+        """Albums a second the queue has been going at lately: its rounds over the last hour, as long as
+        they followed one another (a wait of more than 10 minutes - a browser check, a limit - starts over).
+        None until there are three rounds to go by."""
+        pts = list(self._pace)
+        if len(pts) < 3:
+            return None
+        tail = [pts[-1]]
+        for p in reversed(pts[:-1]):
+            if tail[0][0] - p[0] > 600 or pts[-1][0] - p[0] > 3600 or p[1] < tail[0][1]:
+                break
+            tail.insert(0, p)
+        if len(tail) < 3:
+            return None
+        dt, dn = tail[-1][0] - tail[0][0], tail[0][1] - tail[-1][1]
+        return dn / dt if dt > 0 and dn > 0 else None
+
     def status(self, log_since: int = 0) -> dict:
         s = self.catalog.settings()
         full = self.catalog.last_scan("full")
@@ -1855,6 +1883,7 @@ class Engine:
                             user=(s.get("account_user") or "").strip()),
             "limits": {k: int(s.get(k) or 0) for k in ("pages_per_minute", "files_per_hour", "albums_per_day")},
             "leftovers": self.leftovers,
+            "queue": self._queue_status(),
             "data_dir": s["data_dir"],
             "version_key": self.catalog.version,
             "log": self.logbuf.since(log_since),
@@ -1898,12 +1927,6 @@ class Engine:
 # owner's log (October 2026): mostly a single page gets the check - opening an album 18 s later worked;
 # after a heavy night it lasted hours - 2 h between tries costs one page request each
 CHALLENGE_FIRST = 60
-# the pause between albums (setting album_pause "auto"): starts at a minute - what got the next album
-# page through on the owner's connection - grows when a check comes anyway, shrinks while none does
-PAUSE_START = 60
-PAUSE_MIN = 20
-PAUSE_MAX = 300
-PAUSE_EASE_AFTER = 20
 CHALLENGE_WAIT = 600
 CHALLENGE_WAIT_MAX = 2 * 3600
 

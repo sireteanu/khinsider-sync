@@ -55,15 +55,12 @@ DEFAULT_SETTINGS = {
     "pages_per_minute": 60,         # khinsider page requests a minute (album + track pages; 0 = no limit) - pacing.py
     "files_per_hour": 0,            # files downloaded in any hour (0 = no limit); the rest waits
     "albums_per_day": 0,            # albums started in any 24 hours (0 = no limit); the rest waits
-    "album_pause": "0",             # seconds between albums (0 = none) or "auto": learned, album_pause_auto
-    "album_pause_auto": 60,         # set by the app (album_pause auto)
-    "album_pause_streak": 0,        # set by the app: albums since the last check after a pause
-    "albums_per_batch": 1,          # album pages a sync reads (one at a time) before downloading them; then the next batch
+    "albums_per_batch": 10,         # album pages a sync reads (one at a time) before downloading them; then the next batch
     "player_links": True,           # MP3 addresses from the album page's player: no track page for them
     "account_user": "",             # a khinsider account (paid: whole albums as zips) - account.py
     "account_password": "",         # never sent to the page (web.public_settings)
     "account_zips": True,           # use album zips while the account may (else file by file)
-    "account_mode": "zip",          # zip: a sync downloads each album's zip | queue: only puts it on the list
+    "account_tidy": [],             # set by the app: album ids to take off the account's list after the queue
     "account_cookies": {},          # set by the app: the signed-in session, kept between jobs
     "account_status": {},           # set by the app: {state: ok | no_mass | failed, message, user, at}
     "challenge_retries": 0,         # set by the app: browser checks in a row (each doubles the wait)
@@ -289,6 +286,10 @@ class Catalog:
             CREATE INDEX IF NOT EXISTS quota_t ON quota(kind, t);
         """)
         cols = {r[1] for r in self.db.execute("PRAGMA table_info(files)")}
+        # settings of features that are gone: "Pause between albums" (1.0.34 - it didn't keep the browser
+        # check away) and "only add albums to my khinsider list" (1.0.34 - syncs download their zips)
+        self.db.execute("DELETE FROM settings WHERE k IN ('album_pause', 'album_pause_auto', "
+                        "'album_pause_streak', 'account_mode')")
         if "cover" not in cols:                  # 1.0.9: covers embedded into music files (covers.py)
             self.db.execute("ALTER TABLE files ADD COLUMN cover TEXT")
         if "tags" not in cols:                   # 1.0.11: missing tags filled in (covers.py)

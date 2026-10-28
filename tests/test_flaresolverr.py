@@ -156,3 +156,25 @@ def test_account_cookies_reach_curls_session_through_the_wrapper(site, app_facto
     cp = [h for p, h in site.requests[login:] if p.startswith("/cp/")]      # once signed in
     assert cp and all("xf_user=" in h.get("Cookie", "") for h in cp)
     assert all(h.get("Cookie", "").count("xf_user=") == 1 for h in cp), "one Cookie header, one copy"
+
+
+def test_one_flaresolverr_session_is_reused(site, app_factory):
+    site.solver = "html"                          # every checked page goes through FlareSolverr
+    c = app_factory(site, settings=solver_settings(site))
+    site.challenge = True
+    scan(c)
+    scan(c)                                       # the next job keeps it too
+    assert len(site.solver_calls) > 2
+    assert site.solver_created == 1
+    assert set(site.solver_sessions) == {"mock-session-1"}
+
+
+def test_a_failure_drops_the_session(site, app_factory):
+    site.solver = "fail"
+    c = app_factory(site, settings=solver_settings(site))
+    site.challenge = True
+    scan(c)
+    site.solver = "html"
+    c.app.state.engine.solve_state.failed_at = 0  # past the cooldown
+    scan(c)
+    assert site.solver_created == 2, "a new session after the failure"

@@ -39,6 +39,7 @@ from .util import is_challenge
 log = logging.getLogger("khinsider_sync")
 
 TIMEOUT_MS = 60000              # how long FlareSolverr may take for one page
+SESSION_TTL = 30                # minutes: FlareSolverr renews a session of ours older than this by itself
 COOLDOWN = 60.0                 # seconds without a new attempt after FlareSolverr failed
 
 
@@ -75,18 +76,40 @@ class FlareSolverr:
         return {"ok": ok, "version": str(data.get("version") or ""),
                 "message": str(data.get("msg") or f"HTTP {r.status_code}")}
 
-    async def get(self, url: str, user_agent: str = "", cookies: Optional[dict] = None) -> Optional[dict]:
+    async def _call(self, body: dict, timeout: float = 30) -> dict:
+        async with httpx.AsyncClient(timeout=timeout) as c:
+            r = await c.post(self.url + "/v1", json=body)
+            return r.json()
+
+    async def create_session(self) -> Optional[str]:
+        """A browser FlareSolverr keeps open for us: later pages skip starting one (much faster)."""
+        try:
+            data = await self._call({"cmd": "sessions.create"})
+        except (httpx.HTTPError, ValueError) as e:
+            log.debug("FlareSolverr session not created: %s", e)
+            return None
+        return str(data.get("session") or "") or None if data.get("status") == "ok" else None
+
+    async def destroy_session(self, session: str) -> None:
+        try:
+            await self._call({"cmd": "sessions.destroy", "session": session}, timeout=10)
+        except (httpx.HTTPError, ValueError):
+            pass
+
+    async def get(self, url: str, user_agent: str = "", cookies: Optional[dict] = None,
+                  session: Optional[str] = None) -> Optional[dict]:
         """FlareSolverr's `solution` for `url` ({url, status, headers, response, cookies, userAgent})
         or None when it couldn't get the page."""
         body = {"cmd": "request.get", "url": url, "maxTimeout": self.timeout_ms}
+        if session:
+            body["session"] = session
+            body["session_ttl_minutes"] = SESSION_TTL
         if cookies:
             # the client's own cookies go along - a signed-in khinsider account's session above all, so
             # its pages (/cp/add_album ...) come back signed in
             body["cookies"] = [{"name": k, "value": v} for k, v in cookies.items()]
         try:
-            async with httpx.AsyncClient(timeout=self.timeout_ms / 1000 + 15) as c:
-                r = await c.post(self.url + "/v1", json=body)
-                data = r.json()
+            data = await self._call(body, timeout=self.timeout_ms / 1000 + 15)
         except (httpx.HTTPError, ValueError) as e:
             log.warning("FlareSolverr (%s) didn't answer: %s", self.url, e or type(e).__name__)
             return None
@@ -104,6 +127,8 @@ class SolveState:
         self.user_agent = ""
         self.solved_at = 0.0
         self.failed_at = 0.0        # FlareSolverr's last failure (no new attempt for `cooldown`)
+        self.session: Optional[str] = None   # FlareSolverr's browser session we reuse
+        self.session_url = ""                # ... on this FlareSolverr
         self.solves = 0
         self.pages = 0              # pages FlareSolverr's own copy was used for
         self.lock = asyncio.Lock()
@@ -202,9 +227,14 @@ class SolverTransport(httpx.AsyncBaseTransport):
         if time.time() - st.failed_at < self.cooldown:
             return None                                    # it just failed: wait as usual
         log.info("Cloudflare browser check on %s - asking FlareSolverr", request.url.path)
-        sol = await self.solver.get(str(request.url), st.user_agent, self._cookies_for(request))
+        if st.session_url != self.solver.url:              # another FlareSolverr: its own session
+            st.session, st.session_url = None, self.solver.url
+        if st.session is None:
+            st.session = await self.solver.create_session()
+        sol = await self.solver.get(str(request.url), st.user_agent, self._cookies_for(request), st.session)
         if not sol:
             st.failed_at = time.time()
+            st.session = None                              # maybe it's gone (FlareSolverr restarted): a new one
         return sol
 
     def _take(self, sol: dict) -> None:

@@ -1,5 +1,33 @@
 # Changelog
 
+## [1.0.34] - 2026-10-28
+
+### New
+- **The whole queue's time left**: while a long queue runs, the job line in the Activity panel shows
+  the albums still to go and about how long they'll take at the pace of the last rounds.
+
+### Improved
+- **Taking saved albums off your khinsider list waits until the queue is through.** It's one page read
+  per album (khinsider can't remove several at once), so during the queue it slowed every album down
+  by a third. The total is the same; the queue just finishes sooner, and the tidy-up follows.
+- **Bigger rounds by default**: Albums at a time is 10 for new installs (was 1). Less housekeeping
+  between rounds; the walk over the download folder for leftovers runs every half hour during a long
+  queue and at its end, not after every round. A setting you saved yourself stays as it is.
+- **FlareSolverr keeps one browser session open** and reuses it, so a checked page doesn't wait for
+  a new browser each time.
+- **Numbered track names don't repeat the track number** when khinsider's title starts with it
+  ("01 - 01 Title.mp3" is now "01 - Title.mp3"). Files already saved are moved by the next sync, not
+  downloaded again.
+- **Quieter log**: a long queue's later rounds keep one line each besides the files; their
+  housekeeping lines (folders dated, covers, albums read ...) are summed up every half hour and at the
+  end of the queue.
+
+### Changed
+- **Removed "Pause between albums"** (and its automatic mode): it never kept khinsider's browser check
+  away - the real cause was fixed in 1.0.27.
+- **Removed "Only add it to my khinsider list"** (When a sync comes to an album): syncs download
+  each album's zip. A saved "only add" setting now downloads. **Download my khinsider list** stays.
+
 ## [1.0.33] - 2026-10-28
 
 ### Fixed

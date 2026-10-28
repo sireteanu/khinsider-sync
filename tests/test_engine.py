@@ -804,7 +804,7 @@ def test_a_title_ending_in_its_extension_isnt_named_twice(site, app_factory, mon
     under the old name are renamed by the next sync, not downloaded again."""
     from khinsider_sync import engine as eng_mod
     from khinsider_sync.engine import track_name
-    assert track_name({"title": "01 Title.mp3", "num": "1", "ext": ".mp3"}) == "01 - 01 Title.mp3"
+    assert track_name({"title": "Title.mp3", "num": "1", "ext": ".mp3"}) == "01 - Title.mp3"
     assert track_name({"title": "Song.MP3", "num": "2", "ext": ".flac"}) == "02 - Song.flac"
     assert track_name({"title": "v1.5", "num": "3", "ext": ".mp3"}) == "03 - v1.5.mp3"
     site.albums[SMW]["tracks"][1] = ("", "2", "02. Title Screen", "Title Screen.mp3", "0:46")
@@ -860,3 +860,46 @@ def test_a_cover_that_cant_be_loaded_is_tried_again_a_day_later(site, app_factor
     st = sync(c)
     cover = (c.data / "Super Mario World" / "Cover.jpg").read_bytes()
     assert pictures(c.data / "Super Mario World" / "01. Nintendo Logo.mp3") == [cover]
+
+
+def test_a_title_starting_with_its_own_number_isnt_numbered_twice():
+    from khinsider_sync.engine import track_name
+
+    def name(title, num):
+        return track_name({"title": title, "num": num, "ext": ".mp3"})
+    assert name("01 Title", "1") == "01 - Title.mp3"
+    assert name("3. Intro", "3") == "03 - Intro.mp3"
+    assert name("01 Title.mp3", "1") == "01 - Title.mp3"
+    assert name("2 Become 1", "2") == "02 - 2 Become 1.mp3", "a single digit and a space: part of the title"
+    assert name("007 Theme", "7") == "07 - 007 Theme.mp3"
+    assert name("01 Title", "2") == "02 - 01 Title.mp3", "another number: kept"
+    assert name("01", "1") == "01 - 01.mp3", "nothing would be left"
+
+
+def test_later_rounds_of_a_queue_keep_the_log_short(site, app_factory):
+    c = app_factory(site, settings={"albums_per_batch": 1, "album_art": False})
+    scan(c)
+    select(c, "p:windows")                        # three albums: three rounds
+    st = sync(c)
+    lines = log_lines(st)
+    assert st["sync"]["failed"] == 0
+    assert sum("Reading 1 album pages first" in m for m in lines) == 1, "first round only"
+    assert sum(m.startswith("Sync finished") for m in lines) == 3, "one line a round"
+    assert any(m.startswith("Queue done: 3 rounds") for m in lines)
+
+
+def test_the_queue_pace_and_time_left(site, app_factory):
+    c = app_factory(site)
+    eng = c.app.state.engine
+    assert eng.queue_pace() is None
+    now = time.time()
+    eng._pace.extend([(now - 120, 100), (now - 60, 96), (now, 92)])   # 8 albums in 2 minutes
+    assert abs(eng.queue_pace() - 8 / 120) < 1e-9
+    eng._pace.clear()
+    eng._pace.extend([(now - 3000, 100), (now - 120, 96), (now - 60, 94), (now, 92)])  # a long wait first
+    assert abs(eng.queue_pace() - 4 / 120) < 1e-9, "the wait before isn't part of the pace"
+    scan(c)
+    select(c, "p:windows")
+    eng.catalog.save_settings({"queue_resume_at": time.time() + 60})  # the queue goes on
+    q = c.get("/api/status").json()["queue"]
+    assert q["albums_left"] == 3 and q["eta"] == round(3 / (4 / 120))

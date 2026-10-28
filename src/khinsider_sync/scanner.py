@@ -40,6 +40,7 @@ class Scanner:
                  user_agent: str = "", robots: Optional[RobotFileParser] = None,
                  store: Optional[Callable[[str, dict], int]] = None):
         self.catalog = catalog
+        self.quiet = False                 # "Read N album pages" at debug level (later rounds of a queue)
         self.base = base_url if base_url.endswith("/") else base_url + "/"
         self.client = client
         self.workers = workers
@@ -337,7 +338,7 @@ class Scanner:
             self.queue.put_nowait(s)
         await self._pool(handle)
         if self.read or self.errors:
-            log.info("Read %d album pages (%d files)%s%s", self.read, self.files,
+            log.log(logging.DEBUG if self.quiet else logging.INFO, "Read %d album pages (%d files)%s%s", self.read, self.files,
                      f", {self.errors} failed" if self.errors else "",
                      f", {len(missing)} gone from the site" if missing else "")
         return {"read": self.read, "files": self.files, "errors": self.errors, "renamed": renamed,

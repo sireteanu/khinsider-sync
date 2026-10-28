@@ -196,7 +196,9 @@ class MockSite:
         self.challenge = False             # pages answer Cloudflare's browser check (403, cf-mitigated)
         self.solver = "ok"                 # mock FlareSolverr: ok | html | fail (see the docstring)
         self.solver_calls: list = []
-        self.solver_cookies: list = []     # names of the cookies each FlareSolverr request carried
+        self.solver_cookies: list = []
+        self.solver_sessions: list = []    # the FlareSolverr session each request named
+        self.solver_created = 0            # sessions.create calls     # names of the cookies each FlareSolverr request carried
         self.robots_extra = ""             # more robots.txt lines
         self.broken_images: set = set()    # image names that answer 404 (listed on the page, file gone)
         self.player = True                 # album pages carry the music player's packed track list
@@ -673,8 +675,15 @@ class MockSite:
         return f"cf_clearance={self.CLEARANCE}" in cookies
 
     def solve(self, req: dict) -> dict:
-        """The mock FlareSolverr's answer to {"cmd": "request.get", "url": ...}."""
+        """The mock FlareSolverr's answer to {"cmd": "request.get", "url": ...} (and sessions.create /
+        sessions.destroy: solver_sessions lists the session each request.get named, None without one)."""
+        if req.get("cmd") == "sessions.create":
+            self.solver_created += 1
+            return {"status": "ok", "session": f"mock-session-{self.solver_created}"}
+        if req.get("cmd") == "sessions.destroy":
+            return {"status": "ok"}
         self.solver_calls.append(req.get("url"))
+        self.solver_sessions.append(req.get("session"))
         if self.solver == "fail" or req.get("cmd") != "request.get":
             return {"status": "error", "message": "Error: Error solving the challenge. Timeout after 60.0 seconds."}
         import urllib.error

@@ -114,12 +114,6 @@ class Account:
         self.listed = parse.mass_downloads(r.content)
         return self.listed
 
-    async def queue(self, albumid: int, slug: str) -> None:
-        """Put the album on the list (to download later - from the list, any time)."""
-        await self._add(albumid)
-        if self.listed is not None:
-            self.listed.setdefault(slug, {"albumid": albumid, "zips": {}})
-
     # ------------------------------------------------------------------ album zips
     async def album_zip(self, albumid: int, fmt: str, slug: str) -> str:
         """The address of the album's zip in `fmt` (".mp3" / ".flac"): from the list when the album is

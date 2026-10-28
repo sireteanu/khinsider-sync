@@ -736,8 +736,10 @@ function renderStatus(st) {
       list: "Download of my khinsider list" }[job.kind] || job.kind;
     line.textContent = busy
       ? `${what}: ${outage ? "waiting for khinsider" : job.phase}`
-        + (job.pause_until ? ` (${Math.max(0, Math.round(job.pause_until - Date.now() / 1000))} s - khinsider's check comes right after a burst of files)` : "")
         + ` - started ${clock(job.started)}`
+        + (st.queue && st.queue.eta != null
+          ? ` · ${st.queue.albums_left.toLocaleString()} albums to go, about ${duration(st.queue.eta)} at the current pace`
+          : "")
       : `Last ${what.toLowerCase()} ${job.phase === "done" ? "finished" : job.phase} at ${clock(job.finished || job.started)}`
         + (job.message ? `: ${job.message}` : "");
   } else line.textContent = "No job running.";
@@ -1093,7 +1095,6 @@ $("#btn-settings").addEventListener("click", async () => {
   form.account_password.value = "";
   form.account_password.placeholder = s.account_password_set ? "saved - type to change" : "";
   form.account_zips.checked = s.account_zips !== false;
-  form.account_mode.value = s.account_mode === "queue" ? "queue" : "zip";
   showAccount(Object.assign({}, s.account_status || {}, { configured: !!(s.account_user && s.account_password_set) }));
   form.player_links.checked = s.player_links !== false;
   const box = $("#types-list");
@@ -1120,11 +1121,7 @@ $("#btn-settings").addEventListener("click", async () => {
   form.pages_per_minute.value = s.pages_per_minute ?? 60;
   form.files_per_hour.value = s.files_per_hour || 0;
   form.albums_per_day.value = s.albums_per_day || 0;
-  form.albums_per_batch.value = s.albums_per_batch || 1;
-  const pauseV = String(s.album_pause ?? "0");
-  if (![...form.album_pause.options].some((o) => o.value === pauseV)) form.album_pause.add(new Option(`${pauseV} seconds`, pauseV));
-  form.album_pause.value = pauseV;
-  $("#pause-now").textContent = pauseV === "auto" ? ` (now ${s.album_pause_auto ?? 60} s)` : "";
+  form.albums_per_batch.value = s.albums_per_batch || 10;
   const cd = String(s.check_folder_days || 0);
   if (![...form.check_folder_days.options].some((o) => o.value === cd)) {
     const o = document.createElement("option"); o.value = cd; o.textContent = `Every ${cd} days`; form.check_folder_days.append(o);
@@ -1195,7 +1192,6 @@ $("#settings-save").addEventListener("click", async (e) => {
     player_links: form.player_links.checked,
     account_user: form.account_user.value.trim(),
     account_zips: form.account_zips.checked,
-    account_mode: form.account_mode.value,
     platform_types: [...document.querySelectorAll("#types-list input:checked")].map((i) => i.value),
     parallel: auto ? "auto" : form.parallel_n.value,
     max_rate: form.max_rate.value.trim(),
@@ -1207,8 +1203,7 @@ $("#settings-save").addEventListener("click", async (e) => {
     pages_per_minute: form.pages_per_minute.value || 0,
     files_per_hour: form.files_per_hour.value || 0,
     albums_per_day: form.albums_per_day.value || 0,
-    albums_per_batch: Math.max(1, Number(form.albums_per_batch.value) || 1),
-    album_pause: form.album_pause.value,
+    albums_per_batch: Math.max(1, Number(form.albums_per_batch.value) || 10),
     outage_wait_hours: form.outage_wait_hours.value || 0,
     resume_interrupted: form.resume_interrupted.checked,
   };

@@ -50,6 +50,7 @@ src/khinsider_sync/
                 with ITS COPY: never a second request for that page (/cp/add_album, downloads_delete_album
                 change things). Only cf_*/__cf* cookies are taken into the ONE cookie store, with its
                 User-Agent (only together with such a cookie); SolveState on the Engine, kept between jobs.
+                One FlareSolverr session reused (SolveState.session, ttl 30 min; dropped after a failure).
                 Failure: 60 s cooldown, usual wait. browser._jar unwraps `.inner` - without that, account
                 cookies landed in httpx's dropped jar (1.0.31 bug)
     browser.py  ChromeTransport (httpx transport over curl_cffi impersonating Chrome; maps curl errors
@@ -97,10 +98,10 @@ tests/  conftest (app_factory + API helpers), mock_site, fixtures/ (real markup 
   same request. Often a single request gets it: a sync's album page was checked at 9:50:33, opening
   another album by hand at 9:50:51 went through. What brings it on: a burst of file downloads (92 MP3s
   in 12 s at 8 parallel) right before the next album page - that page got the check every time, a
-  minute later it went through. A pause between albums (`album_pause`, `Engine._album_pause`, learned
-  by `_learn_pause`) did NOT help: the check came after a 5-minute pause too, every album (2-3 PM,
-  Oct 28) - default none; auto drops to 0 once a check follows the longest pause. What gets through
-  is the 1-minute retry (a new job); a check after a sync that got files starts the wait at 1 min again.
+  minute later it went through. A pause between albums did NOT help: the check came after a 5-minute
+  pause too, every album (Oct 28) - the setting was removed in 1.0.34 (`catalog` drops its old keys).
+  What gets through is the 1-minute retry (a new job); a check after a sync that got files starts the
+  wait at 1 min again.
   **The real cause (fixed 1.0.27):** `ChromeTransport` passed httpx's Cookie header on top of curl's own
   cookie jar, so every request after the first carried `__cf_bm` twice (two Cookie headers). First page
   of a connection (manual open, retry in a new job) went through, the second got the check.
@@ -114,8 +115,10 @@ tests/  conftest (app_factory + API helpers), mock_site, fixtures/ (real markup 
   then cancels: everything must keep working file by file (`account.configured`, `Account.off`,
   `account_status` no_mass). Never send the password or cookies to the page (`web.public_settings`).
   The list is read once a job (`Account.mass_list`, `Engine._job_list`); albums on it take its zip links
-  (no add_album). `account_mode` queue: syncs only `Account.queue`; job kind `list`
-  (`Engine._from_account_list`) ticks and syncs everything on the list; each album leaves the list once saved.
+  (no add_album). Saved albums go to setting `account_tidy`; `Engine._tidy_list` takes them off the list
+  once the queue is through (end of `_run`: no next batch, no check, no queue_resume_at) - during the queue
+  those page reads would slow every album down. Job kind `list` (`Engine._from_account_list`) ticks and
+  syncs everything on the list. ("Only add to my list" mode, `account_mode`, removed in 1.0.34.)
 - Sizes are shown in MB with two decimals ("5.64 MB"); totals use thousands commas ("1,438 MB").
   No per-file dates: files get the album's Date Added (12:00 local time).
 
@@ -131,7 +134,8 @@ tests/  conftest (app_factory + API helpers), mock_site, fixtures/ (real markup 
    "name (Type, Year)", then "name [slug]" on a clash - never changed afterwards, so new albums never
    move old ones. `engine.album_dir()` = Saved as (`album_places`) or layout folder
    (`folder_layout`: album | platform | type | year) + folder. `Engine.rel_for()` names each file:
-   khinsider's name, or `track_name()` ("1-01 - Title.flac") with `track_names: numbered`; images
+   khinsider's name, or `track_name()` ("1-01 - Title.flac") with `track_names: numbered` (a title's own
+   extension and leading track number aren't repeated); images
    go in `Art/` with `art_folder`. Per-album formats: `album_formats` via `catalog.album_wants()` -
    use it wherever a sync decides what to save (engine, cleanup, web) - per file through
    `Catalog.wants()` (a `Want`: the formats plus `stand_ins`, files of tracks missing in the album's
@@ -171,7 +175,10 @@ tests/  conftest (app_factory + API helpers), mock_site, fixtures/ (real markup 
    whole job (`pacing.PageRate`, also the Resolver's track pages); downloads start at 2 parallel and
    ramp; `files_per_hour` / `albums_per_day` (`pacing.Window`, catalog `quota`) stop a sync cleanly and
    `queue_resume_at` + `Engine.resume_queue` carry on later; a sync reads at most `albums_per_batch` (default
-   `READ_BATCH` = 1) unread album pages, one at a time, the next batches follow in the same job (`_run` loop, `_add_runs`). Respect robots.txt
+   `READ_BATCH` = 10) unread album pages, one at a time, the next batches (rounds) follow in the same job (`_run` loop, `_add_runs`).
+   Later rounds log their housekeeping at debug level (`Engine._note`, `Scanner.quiet`); `_queue_summary`
+   every `SUMMARY_EVERY` and at the end. The leftover walk runs at the end of the queue or every `LEFTOVER_EVERY`.
+   `Engine._pace` / `queue_pace()` / status `queue` give the whole queue's ETA. Respect robots.txt
    (it only disallows /unavailable) - fetched once a day in a client of its own (`Engine._robots`), never in
    front of page requests: a session opening with robots.txt got the Cloudflare check.
 

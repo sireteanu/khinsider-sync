@@ -80,15 +80,10 @@ reads pages too fast - then nothing can be read for a while. In Settings → **G
   by default). For FLAC this is the most files a minute: at 10, about 10 files a minute. A change
   applies at once, also to a sync under way.
 - **Files an hour** and **Albums a day**: spread a long list over hours or days.
-- **Pause between albums** (None by default; from 5 seconds to 5 minutes, or Automatic): a quiet
-  spell after an album's files, before the next
-  album's page. It may keep khinsider's browser check away on some connections; on others the check
-  comes even after 5 minutes, and the sync's own retry a minute after a check does better. Automatic
-  starts at a minute, waits longer when a check comes anyway, shorter while none does, and stops
-  pausing when even 5 minutes don't help. The Activity panel counts a pause down.
-- **Albums at a time** (1 by default): how many new album pages a sync reads before downloading
-  those albums. With 1, it reads one album's page, downloads that album, then reads the next - it
-  never asks for a pile of pages in a row. It goes straight on with the next albums in the same sync.
+- **Albums at a time** (10 by default): how many new album pages a sync reads (one by one) before
+  downloading those albums - a round. It goes straight on with the next round in the same sync.
+  Bigger rounds spend less time on the housekeeping between them; 1 reads one album's page,
+  downloads that album, then reads the next.
 
 If khinsider asks for a browser check anyway, the sync pauses and tries again by itself after a
 minute - then after 10, 20, 40, 80 minutes and at most 2 hours between tries while the check keeps
@@ -112,14 +107,13 @@ page limits still apply.
 khinsider lets paid accounts download whole albums at once. In Settings → **khinsider account**,
 enter your username and password and click **Check sign-in**. With a paid account a sync then gets
 each MP3 (or FLAC) album as **one zip**, unpacks it into the album's folder under the app's names
-and takes it off your "My Mass Downloads" list again - far fewer requests than file by file. The
-Downloading box shows each zip with its progress bar ("Album zip (MP3)" in the album's folder).
+- far fewer requests than file by file. The Downloading box shows each zip with its progress bar
+("Album zip (MP3)" in the album's folder). Getting a zip puts the album on your "My Mass Downloads"
+list on khinsider; once the whole queue is through, the app takes the saved albums off it again (one
+page read each, so it waits until nothing else needs those page reads).
 
-**Add now, download later**: set **When a sync comes to an album** to **Only add it to my khinsider
-list**. A sync then only puts albums on your "My Mass Downloads" list on khinsider. **Download my
-khinsider list** fetches everything on it - also albums you added on the site yourself, which get
-ticked - straight from the list, and takes each album off the list once it's saved. Whether the list
-still downloads after a subscription ends is up to khinsider - keep one album on it to find out.
+**Download my khinsider list** fetches everything on that list - also albums you added on the site
+yourself, which get ticked - straight from the list.
 
 Albums in other formats, and everything once your account can't mass-download any more (when a
 subscription ends), simply come file by file as without an account - the app notices by itself
@@ -128,12 +122,15 @@ is never shown again; clear the username to remove the account.
 
 ## 6. Sync
 
-Click **Sync ticked**. The Activity panel shows how much is left and how long it will take; the
+Click **Sync ticked**. The Activity panel shows how much is left and how long it will take - for a
+long queue, the job line also says how many albums are still to go and about how long they'll take at
+the pace of the last rounds (it appears after three rounds); the
 Downloading box shows each file. You can **Stop** at any time - the next sync continues where it
 stopped, also after a restart or a power cut.
 
-A long list of new albums goes **a few albums at a time** (see Albums at a time above), all in
-the same sync. The box is then called **This run**: its size and time cover only the albums read
+A long list of new albums goes **a round at a time** (see Albums at a time above), all in
+the same sync. The log then keeps one line a round ("Sync finished: …") besides the files, and sums
+the queue up every half hour and at its end. The box is then called **This run**: its size and time cover only the albums read
 so far, and the line under it says how many albums follow - their size isn't known until their
 pages are read.
 

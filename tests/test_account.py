@@ -168,25 +168,41 @@ def adds(site):
     return [p for p, _ in site.requests if "/cp/add_album/" in p]
 
 
-def test_queue_mode_only_puts_albums_on_the_list(site, app_factory):
-    c = account(site, app_factory, account_mode="queue")
+def tidies(site):
+    return [i for i, (p, _) in enumerate(site.requests) if "/cp/downloads_delete_album" in p]
+
+
+def test_the_list_is_tidied_up_once_the_queue_is_through(site, app_factory):
+    """Taking saved albums off My Mass Downloads (one page each) waits until no albums are left to
+    sync: during the queue those page reads would slow every album down."""
+    jazz = "super-mario-world-the-jazz-arrangements"
+    c = account(site, app_factory, albums_per_batch=1)
+    select(c, "a:" + jazz)
     st = sync(c)
-    assert on_disk(c.data) == set(), "nothing downloaded yet"
-    assert list(site.mass["fan"].values()) == [SMW] and len(adds(site)) == 1
-    assert zip_requests(site) == [] and track_files(site) == []
-    assert any("1 albums added to your khinsider list" in m for m in log_lines(st))
-    site.reset_log()
+    zips = [i for i, (p, _) in enumerate(site.requests) if p.lower().endswith(".zip")]
+    assert len(zips) == 2 and st["sync"]["failed"] == 0
+    assert len(tidies(site)) == 2 and min(tidies(site)) > max(zips), "after the last album, not between"
+    assert site.mass["fan"] == {}
+    assert any("Took 2 downloaded albums off your khinsider list" in m for m in log_lines(st))
+    assert c.app.state.engine.catalog.settings()["account_tidy"] == []
+
+
+def test_an_unfinished_tidy_up_waits_for_the_next_sync(site, app_factory):
+    c = account(site, app_factory)
+    c.post("/api/stop")
+    eng = c.app.state.engine
+    eng.catalog.save_settings({"account_tidy": [site.albumid(SMW)]})
+    site.mass["fan"] = {site.albumid(SMW): SMW}
     sync(c)
-    assert adds(site) == [], "on the list already: not added again"
-    assert on_disk(c.data) == set()
+    assert site.mass["fan"] == {} and eng.catalog.settings()["account_tidy"] == []
 
 
 def test_download_my_list(site, app_factory):
     """Everything on the list comes down - also an album added on the site, not ticked in the app -
     straight from the list, and each leaves the list once it's saved."""
     from conftest import wait
-    c = account(site, app_factory, account_mode="queue")
-    sync(c)                                                  # SMW onto the list
+    c = account(site, app_factory)
+    site.mass["fan"] = {site.albumid(SMW): SMW}              # on the list already
     bird = "a-bird-story-linux-macos-windows-gamerip-2014"
     site.mass["fan"][site.albumid(bird)] = bird              # added by hand on khinsider
     site.reset_log()

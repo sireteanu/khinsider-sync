@@ -303,20 +303,9 @@
         <label class="field"><span>Files an hour</span><input name="files_per_hour" type="number" min="0" step="1"><small>0 = no limit.</small></label>
         <label class="field"><span>Albums a day</span><input name="albums_per_day" type="number" min="0" step="1"><small>New albums started; ones under way finish. 0 = no limit.</small></label>
       </div>
-      <label class="field"><span>Pause between albums</span>
-        <select name="album_pause" style="max-width:220px">
-          <option value="0">None</option><option value="auto">Automatic (learns it)</option>
-          <option value="5">5 seconds</option><option value="10">10 seconds</option><option value="15">15 seconds</option>
-          <option value="20">20 seconds</option><option value="30">30 seconds</option><option value="45">45 seconds</option>
-          <option value="60">1 minute</option><option value="120">2 minutes</option>
-          <option value="300">5 minutes</option>
-        </select>
-        <small>After an album's files, before reading the next album's page. On some connections a quiet spell
-          keeps khinsider's browser check away; on others it changes nothing (the sync then waits a minute after
-          a check anyway). Automatic starts at a minute, waits longer when a check comes anyway, shorter while none
-          does, and stops pausing if even 5 minutes don't help<span id="pause-now"></span>.</small></label>
       <label class="field"><span>Albums at a time</span><input name="albums_per_batch" type="number" min="1" step="1" style="max-width:120px">
-        <small>A sync reads this many new album pages (one by one), downloads those albums, then goes on with the next. 1 = one album at a time.</small></label>
+        <small>A sync reads this many new album pages (one by one), downloads those albums, then goes on with the next
+          (10 by default). Bigger rounds spend less time on the housekeeping between them; 1 = one album at a time.</small></label>
       <label class="check"><input type="checkbox" name="player_links"> Take MP3 addresses from the album page's music player
         <small class="muted">- then MP3 files need no track page each: one page read per album instead of one per track (FLAC and other formats still need theirs)</small></label>
       <small>khinsider publishes no limit; its Cloudflare protection starts asking for a browser check when a
@@ -355,20 +344,14 @@
         <label class="field"><span>Password</span><input name="account_password" type="password" autocomplete="new-password" placeholder=""></label>
       </div>
       <label class="check"><input type="checkbox" name="account_zips"> Download whole albums as one zip while the account allows it (paid accounts)</label>
-      <label class="field"><span>When a sync comes to an album</span>
-        <select name="account_mode" style="max-width:520px">
-          <option value="zip">Download its zip right away</option>
-          <option value="queue">Only add it to my khinsider list - download the list later</option>
-        </select>
-        <small>"Only add" puts every album on your "My Mass Downloads" list on khinsider (two page reads each, no
-          download); <b>Download my khinsider list</b> then fetches them all, straight from the list, and takes each
-          off the list once it's saved. Albums you add on the site yourself come along too.</small></label>
       <div class="row-inline"><button type="button" class="btn small" id="account-check">Check sign-in</button>
         <button type="button" class="btn small" id="account-list">Download my khinsider list</button>
         <span id="account-state" class="muted small"></span></div>
       <small>khinsider lets paid accounts download whole albums at once. With one, a sync gets each MP3 or FLAC
         album as a single zip and unpacks it under the app's names; other formats, and everything once the
-        account can't any more, come file by file as without an account. Stored on this server only; the
+        account can't any more, come file by file as without an account. Albums saved this way are taken off your
+        "My Mass Downloads" list once the queue is through. <b>Download my khinsider list</b> ticks and downloads
+        every album on that list, also ones you added on the site yourself. Stored on this server only; the
         password is never shown again. Clear the username to remove the account.</small></fieldset>
     <p id="settings-error" class="error" hidden></p>
     <div class="dlg-foot"><button class="btn ghost" value="cancel">Cancel</button><button class="btn primary" id="settings-save" value="save">Save settings</button></div>
