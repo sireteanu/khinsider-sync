@@ -135,3 +135,29 @@ def test_check_sign_in(site, app_factory):
     assert r["state"] == "signed_in" and r["configured"]
     c.post("/api/settings", json={"account_password": "nope"})
     assert c.post("/api/account/check").json()["state"] == "failed"
+
+
+def test_a_zip_shows_in_the_downloading_box(site, app_factory):
+    import time
+    c = account(site, app_factory)
+    site.slow_all = True
+    assert c.post("/api/sync").status_code == 200
+    seen = None
+    t0 = time.time()
+    while time.time() - t0 < 30:
+        st = c.get("/api/status").json()
+        rows = [a for a in ((st.get("sync") or {}).get("active") or []) if "Album zip" in a["rel"]]
+        if rows:
+            seen = (st, rows[0])
+            break
+        if not st["busy"]:
+            break
+        time.sleep(0.05)
+    assert seen, "the zip appears with its progress while it downloads"
+    st, row = seen
+    assert row["rel"] == "Super Mario World/Album zip (MP3)" and 0 <= row["have"] <= row["total"]
+    assert row["total"] == len(site.album_zip(SMW, site.zip_name(SMW)))
+    assert st["job"]["phase"].startswith("downloading album zips")
+    from conftest import wait
+    assert wait(c)["sync"]["failed"] == 0
+    assert on_disk(c.data) == SMW_FILES

@@ -80,7 +80,8 @@ reads pages too fast - then nothing can be read for a while. In Settings → **G
   by default). For FLAC this is the most files a minute: at 10, about 10 files a minute. A change
   applies at once, also to a sync under way.
 - **Files an hour** and **Albums a day**: spread a long list over hours or days.
-- **Pause between albums** (None by default): a quiet spell after an album's files, before the next
+- **Pause between albums** (None by default; from 5 seconds to 5 minutes, or Automatic): a quiet
+  spell after an album's files, before the next
   album's page. It may keep khinsider's browser check away on some connections; on others the check
   comes even after 5 minutes, and the sync's own retry a minute after a check does better. Automatic
   starts at a minute, waits longer when a check comes anyway, shorter while none does, and stops
@@ -102,7 +103,8 @@ When a limit is reached it stops cleanly and carries on by itself when there's r
 khinsider lets paid accounts download whole albums at once. In Settings → **khinsider account**,
 enter your username and password and click **Check sign-in**. With a paid account a sync then gets
 each MP3 (or FLAC) album as **one zip**, unpacks it into the album's folder under the app's names
-and takes it off your "My Mass Downloads" list again - far fewer requests than file by file.
+and takes it off your "My Mass Downloads" list again - far fewer requests than file by file. The
+Downloading box shows each zip with its progress bar ("Album zip (MP3)" in the album's folder).
 
 Albums in other formats, and everything once your account can't mass-download any more (when a
 subscription ends), simply come file by file as without an account - the app notices by itself

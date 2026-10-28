@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.29] - 2026-10-28
+
+### Improved
+- An album zip shows in the Downloading box with its progress bar ("Album zip (MP3)" under the
+  album's folder), and the speed and time left count it.
+- **Pause between albums** has shorter steps: 5, 10, 15, 20 and 45 seconds besides 30 seconds and
+  1, 2 and 5 minutes.
+
 ## [1.0.28] - 2026-10-28
 
 ### New

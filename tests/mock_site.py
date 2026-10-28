@@ -374,7 +374,13 @@ class MockSite:
                     self._head(206, ctype, len(data) - start, [("Content-Range", f"bytes {start}-{len(data) - 1}/{len(data)}")])
                 else:
                     self._head(200, ctype, len(data))
-                self.wfile.write(data[start:])
+                if site.slow_all:                      # in small pieces, so a test sees it under way
+                    for i in range(start, len(data), 128):
+                        self.wfile.write(data[i:i + 128])
+                        self.wfile.flush()
+                        time.sleep(0.05)
+                else:
+                    self.wfile.write(data[start:])
 
             def _serve(self, slug, name):
                 data = site.content(slug, name)

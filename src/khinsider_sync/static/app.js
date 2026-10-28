@@ -694,7 +694,7 @@ function renderStatus(st) {
   const busy = st.busy;
   const job = st.job;
   const pill = $("#jobpill");
-  const syncing = st.sync && job && job.phase === "downloading" && busy && !st.sync.outage;
+  const syncing = st.sync && job && (job.phase || "").startsWith("downloading") && busy && !st.sync.outage;
   const outage = busy && st.sync && st.sync.outage;
   pill.className = "pill " + (outage ? "warn" : busy ? "busy" : st.sync && st.sync.paused ? "warn" : "idle");
   pill.textContent = outage ? "Waiting for site" : busy ? ({ scan: "Scanning", quick: "Scanning", read: "Reading", check: "Checking" }[job.kind] || "Syncing") :
@@ -869,7 +869,7 @@ function renderEta(st, busy) {
   const total = s.bytes_planned || 0;
   const left = Math.min(s.bytes_left || 0, total);
   $("#eta-total").textContent = `${bytes(total)} in ${num(s.to_fetch)} ${s.to_fetch === 1 ? "file" : "files"}`;
-  const downloading = busy && st.job && st.job.phase === "downloading";
+  const downloading = busy && st.job && (st.job.phase || "").startsWith("downloading");
   let time;
   if (downloading && s.paused) time = "Paused";
   else if (downloading && s.outage) time = "Waiting for site";

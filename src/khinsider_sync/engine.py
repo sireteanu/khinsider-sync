@@ -920,14 +920,7 @@ class Engine:
                 await asyncio.sleep(0.25)
                 if not dl.paused and not dl.outage:
                     await self.gate.tick(queue.qsize())
-                now = time.monotonic()
-                if not self._samples or now - self._samples[-1][0] >= 1:
-                    self._samples.append((now, dl.bytes))
-                    t0, b0 = self._samples[0]
-                    self.speed = (dl.bytes - b0) / (now - t0) if now > t0 else 0.0
-                    self._eta_samples.append((now, dl.bytes))
-                    t1, b1 = self._eta_samples[0]
-                    self.eta_speed = (dl.bytes - b1) / (now - t1) if now - t1 >= 3 else 0.0
+                if self._sample_speed(dl.bytes):
                     manifest.commit()
                     self.catalog.commit()
 
@@ -1482,6 +1475,19 @@ class Engine:
         log.info("The last sync didn't finish (the app was closed or stopped) - continuing it")
         return self.start("sync")
 
+    def _sample_speed(self, total: int) -> bool:
+        """Speed and time left from the bytes downloaded so far (at most once a second) -> sampled?"""
+        now = time.monotonic()
+        if self._samples and now - self._samples[-1][0] < 1:
+            return False
+        self._samples.append((now, total))
+        t0, b0 = self._samples[0]
+        self.speed = (total - b0) / (now - t0) if now > t0 else 0.0
+        self._eta_samples.append((now, total))
+        t1, b1 = self._eta_samples[0]
+        self.eta_speed = (total - b1) / (now - t1) if now - t1 >= 3 else 0.0
+        return True
+
     async def _album_zips(self, client, s, todo, wants, albums, kinds, dl, manifest, on_done) -> list:
         """Albums whose files to fetch are all of one format (MP3 or FLAC, plus images) come as the
         album's zip from a paid khinsider account (account.py), one album after another: download,
@@ -1537,7 +1543,9 @@ class Engine:
         tmp = os.path.join(self.data_dir, ".khinsider-sync-zips")
         os.makedirs(tmp, exist_ok=True)
         part = os.path.join(tmp, f"{slug}{'.flac' if fmt == '.flac' else ''}.zip.part")
-        label = f"{slug} ({fmt[1:].upper()} zip)"
+        a = self.catalog.album(slug) or {}
+        # shown in the Downloading box like a file: the album's folder, then what's coming
+        label = f"{self.album_dir(a, self.catalog.settings()) if a else slug}/Album zip ({fmt[1:].upper()})"
         have = os.path.getsize(part) if os.path.exists(part) else 0
         headers = {"Range": f"bytes={have}-"} if have else {}
         async with self.client_stream(dl.client, zip_url, headers) as r:
@@ -1557,11 +1565,13 @@ class Engine:
                         f.write(chunk)
                         dl.bytes += len(chunk)
                         dl.active[label][0] += len(chunk)
+                        self._sample_speed(dl.bytes)
                         if self.stop_requested:
                             break
-                dl.active.pop(label, None)
         if self.stop_requested:
+            dl.active.pop(label, None)
             return set()                                 # the .part stays: resumed next time
+        self.job["phase"] = "downloading album zips - unpacking"
 
         def unpack() -> list:
             saved = []
@@ -1587,7 +1597,11 @@ class Engine:
                     manifest.done(rel, url, m.file_size, None, None, info)
                     saved.append((url, rel, DONE_WORD.get(action, "new"), m.file_size))
             return saved
-        saved = await asyncio.to_thread(unpack)
+        try:
+            saved = await asyncio.to_thread(unpack)
+        finally:
+            dl.active.pop(label, None)
+            self.job["phase"] = "downloading album zips"
         manifest.commit()
         for url, rel, word, size in saved:
             on_done(url, rel, word, size)
@@ -1759,14 +1773,15 @@ class Engine:
             rate = p["done"] / spent if spent > 1 and p["done"] else 0
             p["eta"] = round((p["total"] - p["done"]) / rate) if rate else None
             out["check"] = p
-        if self.downloader is not None and self.job and self.job.get("phase") in ("downloading", "done", "stopped"):
+        phase = (self.job or {}).get("phase") or ""
+        if self.downloader is not None and (phase.startswith("downloading") or phase in ("done", "stopped")):
             dl, g = self.downloader, self.gate
             st = self.sync_stats
             active = list(dl.active.items())
             # what this sync still has to transfer: planned sizes of unfinished files minus what the
             # files in progress already have on disk (page sizes are rounded, so it's an estimate)
             left = max(0, st["bytes_planned"] - st["bytes_settled"] - sum(h for _, (h, _t) in active))
-            running = self.busy and self.job.get("phase") == "downloading"
+            running = self.busy and phase.startswith("downloading")
             eta = (left / self.eta_speed if running and self.eta_speed > 0 and not dl.paused and not dl.outage
                    else None)
             out["sync"] = dict(st, bytes=dl.bytes, speed=self.speed, paused=dl.paused,
