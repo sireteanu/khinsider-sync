@@ -102,6 +102,9 @@ tests/  conftest (app_factory + API helpers), mock_site, fixtures/ (real markup 
   flat, khinsider's file names + images + khinsider.info.txt. Owner subscribes for the first big sync,
   then cancels: everything must keep working file by file (`account.configured`, `Account.off`,
   `account_status` no_mass). Never send the password or cookies to the page (`web.public_settings`).
+  The list is read once a job (`Account.mass_list`, `Engine._job_list`); albums on it take its zip links
+  (no add_album). `account_mode` queue: syncs only `Account.queue`; job kind `list`
+  (`Engine._from_account_list`) ticks and syncs everything on the list; each album leaves the list once saved.
 - Sizes are shown in MB with two decimals ("5.64 MB"); totals use thousands commas ("1,438 MB").
   No per-file dates: files get the album's Date Added (12:00 local time).
 

@@ -220,6 +220,8 @@ class Engine:
         self.task: Optional[asyncio.Task] = None
         self.scanner: Optional[Scanner] = None
         self.account = None                            # account.Account of the running sync (album zips)
+        self._job_list: Optional[dict] = None          # the account's list, read once a job
+        self._from_list = False                        # the job is "Download my khinsider list"
         self.downloader: Optional[Downloader] = None
         self.gate: Optional[DownloadGate] = None
         self.sync_stats: dict = {}
@@ -403,6 +405,8 @@ class Engine:
                      "account_zips",
                      "playlists", "folder_art", "embed_cover", "write_tags"):
                 v = bool(v)
+            if k == "account_mode" and v not in ("zip", "queue"):
+                raise ValueError("account mode must be zip or queue")
             if k == "album_pause":
                 v = str(v if v is not None else "auto").strip().lower() or "auto"
                 if v != "auto":
@@ -484,13 +488,16 @@ class Engine:
         self.stop_requested = False
         self.job = {"kind": kind, "phase": "starting", "started": time.time(), "scheduled": scheduled,
                     "message": ""}
+        self._job_list = None
+        self._from_list = kind == "list"
         if kind in ("sync", "scan+sync", "quick+sync") and not albums:
             # remembered until the sync ends on its own or is stopped, so a sync cut off by a
             # crash, reboot or app restart carries on (and resumes its .part files) at next start
             self.catalog.save_settings({"interrupted_job": kind})
         what = {"scan": "scan of the album lists", "read": "reading album pages", "sync": "sync",
                 "scan+sync": "scan + sync", "check": "check of the download folder",
-                "quick": "scan for new albums", "quick+sync": "scan for new albums + sync"}.get(kind, kind)
+                "quick": "scan for new albums", "quick+sync": "scan for new albums + sync",
+                "list": "download of your khinsider list"}.get(kind, kind)
         log.info("Starting %s (%s)", what, "scheduled" if scheduled else "requested")
         self.task = asyncio.create_task(self._run(kind, albums))
         return True
@@ -594,6 +601,8 @@ class Engine:
                         slugs = albums if albums else self.catalog.selected_albums()
                         self.job["phase"] = "reading album pages"
                         summary["read"] = await self._scanner(client, robots).read_albums(slugs)
+                    if kind == "list" and not self.stop_requested:
+                        summary["sync"] = await self._from_account_list(client, robots)
                     if kind in ("sync", "scan+sync", "quick+sync") and not self.stop_requested:
                         summary["sync"] = await self._sync(client, robots, albums if kind == "sync" else None)
                         # a long list goes a batch at a time (albums_per_batch): go straight on with the
@@ -1488,12 +1497,56 @@ class Engine:
         self.eta_speed = (total - b1) / (now - t1) if now - t1 >= 3 else 0.0
         return True
 
+    async def _from_account_list(self, client, robots) -> dict:
+        """"Download my khinsider list": every album on the account's list is ticked and synced - its zip
+        straight from the list (no add_album), then taken off the list."""
+        s = self.catalog.settings()
+        if not account_mod.configured(s):
+            log.warning("No khinsider account with album zips in Settings - nothing to take from a list")
+            return {"files": 0}
+        acct = account_mod.Account(self.catalog, self.base, client, self.page_rate)
+        self.job["phase"] = "reading your khinsider list"
+        try:
+            listed = await acct.mass_list()
+        except ChallengeError:
+            self.job["message"] = "khinsider asks for a browser check - see the log"
+            return {"challenged": True}
+        except (account_mod.AccountError, httpx.HTTPError) as e:
+            log.warning("Couldn't read your khinsider list: %s", e)
+            return {"files": 0}
+        self._job_list = listed
+        known = self.catalog.albums_by_slug(list(listed))
+        missing = [sl for sl in listed if sl not in known]
+        if missing:
+            log.warning("%d albums on your khinsider list aren't in the catalog yet (scan the site first): %s",
+                        len(missing), ", ".join(missing[:5]) + (" ..." if len(missing) > 5 else ""))
+        slugs = [sl for sl in listed if sl in known]
+        selected = set(self.catalog.selected_albums())
+        for sl in slugs:
+            if sl not in selected:
+                self.catalog.select(ALBUM + sl, True)    # on the list = wanted: ticked like any other
+        self._sel_cache = None
+        log.info("Your khinsider list: %d albums", len(slugs))
+        if not slugs:
+            return {"files": 0}
+        return await self._sync(client, robots, slugs)
+
     async def _album_zips(self, client, s, todo, wants, albums, kinds, dl, manifest, on_done) -> list:
         """Albums whose files to fetch are all of one format (MP3 or FLAC, plus images) come as the
         album's zip from a paid khinsider account (account.py), one album after another: download,
         unpack under the app's own names, take the album off the account's list. -> the items left
         for the file-by-file downloads (other formats, files a zip lacks, or no zips any more)."""
-        acct = self.account = account_mod.Account(self.catalog, self.base, client, self.page_rate)
+        acct = self.account = account_mod.Account(self.catalog, self.base, client, self.page_rate,
+                                                  listed=self._job_list)
+        # "queue": a sync only puts albums on the account's list - "Download my khinsider list" fetches them
+        queue_only = s.get("account_mode") == "queue" and not self._from_list
+        try:
+            self._job_list = await acct.mass_list()      # once a job: albums on it need no add_album
+        except ChallengeError:
+            acct.off = "khinsider asked for a browser check"
+        except (account_mod.AccountError, httpx.HTTPError) as e:
+            acct.off = str(e)
+            log.warning("Couldn't read your khinsider list (%s) - downloading file by file", e)
         by_album: dict = {}
         for it in todo:
             by_album.setdefault(kinds[it[0]][0], []).append(it)
@@ -1503,7 +1556,7 @@ class Engine:
             return kinds[it[0]][1] == "art"
         names = self.catalog.file_names(it[0] for it in todo)
         left: list = []
-        done_albums = 0
+        done_albums = queued = 0
         for slug, items in by_album.items():
             want = wants.get(slug)
             audio = sorted({it[2].ext for it in items if not is_art(it)} &
@@ -1515,6 +1568,13 @@ class Engine:
             mine = [it for it in items if is_art(it) or it[2].ext == fmt]
             rest = [it for it in items if it not in mine]
             try:
+                if queue_only:
+                    if slug not in acct.listed:
+                        self.job["phase"] = "adding albums to your khinsider list"
+                        await acct.queue(ids[slug], slug)
+                        queued += 1
+                    left += rest                         # the zip's files wait for "Download my list"
+                    continue
                 self.job["phase"] = "downloading album zips"
                 got = await self._one_zip(acct, slug, ids[slug], fmt, mine, names, dl, manifest, on_done)
             except ChallengeError:
@@ -1534,6 +1594,8 @@ class Engine:
         if done_albums:
             log.info("%d albums came as zips from your khinsider account (%d page requests for them)",
                      done_albums, acct.requests)
+        if queued:
+            log.info("%d albums added to your khinsider list - \"Download my khinsider list\" fetches them", queued)
         self.job["phase"] = "downloading"
         return left
 
@@ -1606,7 +1668,7 @@ class Engine:
         for url, rel, word, size in saved:
             on_done(url, rel, word, size)
         os.remove(part)
-        await acct.remove(albumid)
+        await acct.remove(albumid, slug)
         return {u for u, *_ in saved}
 
     @staticmethod

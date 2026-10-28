@@ -161,3 +161,57 @@ def test_a_zip_shows_in_the_downloading_box(site, app_factory):
     from conftest import wait
     assert wait(c)["sync"]["failed"] == 0
     assert on_disk(c.data) == SMW_FILES
+
+
+# ------------------------------------------------------------------ the account's list
+def adds(site):
+    return [p for p, _ in site.requests if "/cp/add_album/" in p]
+
+
+def test_queue_mode_only_puts_albums_on_the_list(site, app_factory):
+    c = account(site, app_factory, account_mode="queue")
+    st = sync(c)
+    assert on_disk(c.data) == set(), "nothing downloaded yet"
+    assert list(site.mass["fan"].values()) == [SMW] and len(adds(site)) == 1
+    assert zip_requests(site) == [] and track_files(site) == []
+    assert any("1 albums added to your khinsider list" in m for m in log_lines(st))
+    site.reset_log()
+    sync(c)
+    assert adds(site) == [], "on the list already: not added again"
+    assert on_disk(c.data) == set()
+
+
+def test_download_my_list(site, app_factory):
+    """Everything on the list comes down - also an album added on the site, not ticked in the app -
+    straight from the list, and each leaves the list once it's saved."""
+    from conftest import wait
+    c = account(site, app_factory, account_mode="queue")
+    sync(c)                                                  # SMW onto the list
+    bird = "a-bird-story-linux-macos-windows-gamerip-2014"
+    site.mass["fan"][site.albumid(bird)] = bird              # added by hand on khinsider
+    site.reset_log()
+    assert c.post("/api/account/list").status_code == 200
+    st = wait(c)
+    assert SMW_FILES <= on_disk(c.data)
+    assert any(f.startswith("A Bird Story/") for f in on_disk(c.data))
+    assert adds(site) == [], "zips straight from the list"
+    assert site.mass["fan"] == {}, "each taken off the list once saved"
+    assert any("Your khinsider list: 2 albums" in m for m in log_lines(st))
+    assert c.get("/api/albums", params={"show": "ticked", "limit": 100}).json()["total"] == 2, "ticked now"
+
+
+def test_a_sync_takes_an_album_already_on_the_list_from_there(site, app_factory):
+    c = account(site, app_factory)
+    site.mass["fan"] = {site.albumid(SMW): SMW}
+    st = sync(c)
+    assert on_disk(c.data) == SMW_FILES and adds(site) == []
+    assert st["sync"]["failed"] == 0 and site.mass["fan"] == {}
+
+
+def test_download_my_list_without_an_account(site, app_factory):
+    from conftest import wait
+    c = app_factory(site)
+    scan(c)
+    assert c.post("/api/account/list").status_code == 200
+    st = wait(c)
+    assert any("No khinsider account" in m for m in log_lines(st))

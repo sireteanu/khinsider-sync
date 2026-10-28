@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.0.30] - 2026-10-28
+
+### New
+- **Download my khinsider list** (Settings → khinsider account): every album on your "My Mass
+  Downloads" list - also ones you added on the site - is ticked and downloaded straight from the
+  list, and taken off the list once it's saved.
+- **When a sync comes to an album: only add it to my khinsider list** - a sync puts albums on your
+  list without downloading them, to fetch the whole list later.
+
+### Improved
+- A sync takes an album that's already on your list from there (one page read less per album).
+
 ## [1.0.29] - 2026-10-28
 
 ### Improved

@@ -106,6 +106,12 @@ each MP3 (or FLAC) album as **one zip**, unpacks it into the album's folder unde
 and takes it off your "My Mass Downloads" list again - far fewer requests than file by file. The
 Downloading box shows each zip with its progress bar ("Album zip (MP3)" in the album's folder).
 
+**Add now, download later**: set **When a sync comes to an album** to **Only add it to my khinsider
+list**. A sync then only puts albums on your "My Mass Downloads" list on khinsider. **Download my
+khinsider list** fetches everything on it - also albums you added on the site yourself, which get
+ticked - straight from the list, and takes each album off the list once it's saved. Whether the list
+still downloads after a subscription ends is up to khinsider - keep one album on it to find out.
+
 Albums in other formats, and everything once your account can't mass-download any more (when a
 subscription ends), simply come file by file as without an account - the app notices by itself
 and says so in the log and under the account in Settings. The password stays on your server and

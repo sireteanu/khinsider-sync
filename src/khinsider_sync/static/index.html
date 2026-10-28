@@ -347,7 +347,16 @@
         <label class="field"><span>Password</span><input name="account_password" type="password" autocomplete="new-password" placeholder=""></label>
       </div>
       <label class="check"><input type="checkbox" name="account_zips"> Download whole albums as one zip while the account allows it (paid accounts)</label>
+      <label class="field"><span>When a sync comes to an album</span>
+        <select name="account_mode" style="max-width:520px">
+          <option value="zip">Download its zip right away</option>
+          <option value="queue">Only add it to my khinsider list - download the list later</option>
+        </select>
+        <small>"Only add" puts every album on your "My Mass Downloads" list on khinsider (two page reads each, no
+          download); <b>Download my khinsider list</b> then fetches them all, straight from the list, and takes each
+          off the list once it's saved. Albums you add on the site yourself come along too.</small></label>
       <div class="row-inline"><button type="button" class="btn small" id="account-check">Check sign-in</button>
+        <button type="button" class="btn small" id="account-list">Download my khinsider list</button>
         <span id="account-state" class="muted small"></span></div>
       <small>khinsider lets paid accounts download whole albums at once. With one, a sync gets each MP3 or FLAC
         album as a single zip and unpacks it under the app's names; other formats, and everything once the

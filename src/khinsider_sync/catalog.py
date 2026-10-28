@@ -61,6 +61,7 @@ DEFAULT_SETTINGS = {
     "account_user": "",             # a khinsider account (paid: whole albums as zips) - account.py
     "account_password": "",         # never sent to the page (web.public_settings)
     "account_zips": True,           # use album zips while the account may (else file by file)
+    "account_mode": "zip",          # zip: a sync downloads each album's zip | queue: only puts it on the list
     "account_cookies": {},          # set by the app: the signed-in session, kept between jobs
     "account_status": {},           # set by the app: {state: ok | no_mass | failed, message, user, at}
     "challenge_retries": 0,         # set by the app: browser checks in a row (each doubles the wait)

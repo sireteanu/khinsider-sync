@@ -732,7 +732,8 @@ function renderStatus(st) {
   const line = $("#job-line");
   if (job) {
     const what = { scan: "Scan", read: "Reading album pages", sync: "Sync", "scan+sync": "Scan and sync",
-      quick: "Scan for new albums", "quick+sync": "New albums and sync", check: "Check of the download folder" }[job.kind] || job.kind;
+      quick: "Scan for new albums", "quick+sync": "New albums and sync", check: "Check of the download folder",
+      list: "Download of my khinsider list" }[job.kind] || job.kind;
     line.textContent = busy
       ? `${what}: ${outage ? "waiting for khinsider" : job.phase}`
         + (job.pause_until ? ` (${Math.max(0, Math.round(job.pause_until - Date.now() / 1000))} s - khinsider's check comes right after a burst of files)` : "")
@@ -946,6 +947,15 @@ function showAccount(a) {
   if (a && a.at) t += ` - ${new Date(a.at * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}`;
   $("#account-state").textContent = t;
 }
+$("#account-list").addEventListener("click", async () => {
+  try {
+    await api("/api/account/list", { method: "POST", body: {} });
+    $("#settings-dlg").close();
+    poll(true);
+  } catch (err) {
+    $("#account-state").textContent = /busy/.test(String(err.message)) ? "Wait until the running job has finished." : String(err.message || err);
+  }
+});
 $("#account-check").addEventListener("click", async () => {
   $("#account-state").textContent = "Signing in…";
   try {
@@ -1067,6 +1077,7 @@ $("#btn-settings").addEventListener("click", async () => {
   form.account_password.value = "";
   form.account_password.placeholder = s.account_password_set ? "saved - type to change" : "";
   form.account_zips.checked = s.account_zips !== false;
+  form.account_mode.value = s.account_mode === "queue" ? "queue" : "zip";
   showAccount(Object.assign({}, s.account_status || {}, { configured: !!(s.account_user && s.account_password_set) }));
   form.player_links.checked = s.player_links !== false;
   const box = $("#types-list");
@@ -1167,6 +1178,7 @@ $("#settings-save").addEventListener("click", async (e) => {
     player_links: form.player_links.checked,
     account_user: form.account_user.value.trim(),
     account_zips: form.account_zips.checked,
+    account_mode: form.account_mode.value,
     platform_types: [...document.querySelectorAll("#types-list input:checked")].map((i) => i.value),
     parallel: auto ? "auto" : form.parallel_n.value,
     max_rate: form.max_rate.value.trim(),

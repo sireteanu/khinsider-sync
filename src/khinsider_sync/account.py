@@ -44,7 +44,7 @@ def configured(s: dict) -> bool:
 
 
 class Account:
-    def __init__(self, catalog, base: str, client: httpx.AsyncClient, page_rate=None):
+    def __init__(self, catalog, base: str, client: httpx.AsyncClient, page_rate=None, listed: Optional[dict] = None):
         self.catalog = catalog
         self.base = base if base.endswith("/") else base + "/"
         self.host = urlsplit(self.base).hostname or ""
@@ -56,6 +56,7 @@ class Account:
         self.off: Optional[str] = None         # why album zips are off for the rest of this job
         self.signed_in = False
         self.requests = 0
+        self.listed = listed                   # My Mass Downloads ({slug: {albumid, zips}}), read once a job
         set_cookies(client, s.get("account_cookies") or {}, self.host)
 
     # ------------------------------------------------------------------ requests
@@ -100,9 +101,43 @@ class Account:
         self.catalog.save_settings({"account_cookies": keep})
         log.info("Signed in to khinsider as %s", self.user)
 
+    # ------------------------------------------------------------------ the list ("My Mass Downloads")
+    async def mass_list(self, fresh: bool = False) -> dict:
+        """{slug: {albumid, zips: {".mp3": url, ".flac": url}}} of the account's list (read once a job)."""
+        if self.listed is not None and not fresh:
+            return self.listed
+        url = urljoin(self.base, "cp/downloads")
+        r = await self._page("GET", url)
+        if parse.add_album_reply(r.content)["signed_in"] is False:
+            await self.sign_in()
+            r = await self._page("GET", url)
+        self.listed = parse.mass_downloads(r.content)
+        return self.listed
+
+    async def queue(self, albumid: int, slug: str) -> None:
+        """Put the album on the list (to download later - from the list, any time)."""
+        await self._add(albumid)
+        if self.listed is not None:
+            self.listed.setdefault(slug, {"albumid": albumid, "zips": {}})
+
     # ------------------------------------------------------------------ album zips
     async def album_zip(self, albumid: int, fmt: str, slug: str) -> str:
-        """The address of the album's zip in `fmt` (".mp3" / ".flac"): adds it to My Mass Downloads."""
+        """The address of the album's zip in `fmt` (".mp3" / ".flac"): from the list when the album is
+        on it already, else it's added first (/cp/add_album)."""
+        row = (self.listed or {}).get(slug) or {}
+        if (row.get("zips") or {}).get(fmt):
+            return row["zips"][fmt]
+        reply = await self._add(albumid)
+        if fmt == ".mp3":
+            return reply["zip"]
+        row = (await self.mass_list(fresh=True)).get(slug) or {}
+        zip_url = (row.get("zips") or {}).get(fmt)
+        if not zip_url:
+            raise AccountError(f"no {fmt[1:].upper()} zip for this album")
+        return zip_url
+
+    async def _add(self, albumid: int) -> dict:
+        """/cp/add_album/<id> -> its reply (signed in again if needed); NoMassDownloads without a zip."""
         url = urljoin(self.base, f"cp/add_album/{albumid}")
         r = await self._page("GET", url)
         reply = parse.add_album_reply(r.content)
@@ -117,17 +152,12 @@ class Account:
             raise NoMassDownloads(reply["message"] or "no album zip offered")
         if self.catalog.settings().get("account_status", {}).get("state") != "ok":
             self._status("ok", "album zips available")
-        if fmt == ".mp3":
-            return reply["zip"]
-        r = await self._page("GET", urljoin(self.base, "cp/downloads"))
-        row = parse.mass_downloads(r.content).get(slug) or {}
-        zip_url = (row.get("zips") or {}).get(fmt)
-        if not zip_url:
-            raise AccountError(f"no {fmt[1:].upper()} zip for this album")
-        return zip_url
+        return reply
 
-    async def remove(self, albumid: int) -> None:
+    async def remove(self, albumid: int, slug: str = "") -> None:
         """Take the album off My Mass Downloads again (it stays downloadable from the album page)."""
+        if self.listed is not None:
+            self.listed.pop(slug, None)
         try:
             await self._page("GET", urljoin(self.base, f"cp/downloads_delete_album?albumid={albumid}"))
         except (AccountError, httpx.HTTPError) as e:

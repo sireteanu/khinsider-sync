@@ -295,6 +295,13 @@ def create_app(engine_factory, password: Optional[str] = None, on_restart=None, 
                 "upgrade": e.upgrade_info(slug, s),
                 "page": f"{e.base}game-soundtracks/album/{slug}"}
 
+    @app.post("/api/account/list")
+    async def account_list():
+        """Download my khinsider list: every album on the account's "My Mass Downloads"."""
+        if not eng().start("list"):
+            raise HTTPException(409, "already busy")
+        return {"started": True}
+
     @app.post("/api/account/check")
     async def account_check():
         return await eng().check_account()
