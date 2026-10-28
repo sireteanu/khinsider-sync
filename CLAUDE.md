@@ -96,8 +96,8 @@ tests/  conftest (app_factory + API helpers), mock_site, fixtures/ (real markup 
    (`catalog.parse_format_setting`): presets `mp3|flac|best|all` (images per `album_art`), or ordered
    lists `first:`/`all:` with `art` for images; `format_plan()` gives an album's files in order,
    `format_rank()` the download order across albums (the sync sorts its queue by it).
-   **Upgrades** (`Engine.upgrade_album`, setting `album_upgrades`): an album gets `first:<better>[,art]`
-   as its own formats; `_finish_upgrades` (end of a sync, before the leftover check) deletes its old-format
+   **Upgrades** (`Engine.upgrade_album`, setting `album_upgrades`): an album gets `first:<better>,<old formats>[,art]`
+   as its own formats (the old ones only stand in for tracks without the better one); `_finish_upgrades` (end of a sync, before the leftover check) deletes its old-format
    files only once every new file is in; cleanup never lists them meanwhile. `replace_formats` does the
    same for every ticked album after a formats change. Renamed albums take their `album_*` settings along.
 4. **Moving, not re-downloading**: when an album's place changes (layout, Saved as, a renamed
