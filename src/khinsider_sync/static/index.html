@@ -303,6 +303,15 @@
         <label class="field"><span>Files an hour</span><input name="files_per_hour" type="number" min="0" step="1"><small>0 = no limit.</small></label>
         <label class="field"><span>Albums a day</span><input name="albums_per_day" type="number" min="0" step="1"><small>New albums started; ones under way finish. 0 = no limit.</small></label>
       </div>
+      <label class="field"><span>Pause between albums</span>
+        <select name="album_pause" style="max-width:220px">
+          <option value="auto">Automatic (learns it)</option><option value="0">None</option>
+          <option value="30">30 seconds</option><option value="60">1 minute</option><option value="120">2 minutes</option>
+          <option value="300">5 minutes</option>
+        </select>
+        <small>After an album's files, before reading the next album's page: right after a burst of downloads
+          khinsider's browser check comes, a minute later the page goes through. Automatic starts at a minute,
+          waits longer when a check comes anyway and shorter while none does<span id="pause-now"></span>.</small></label>
       <label class="field"><span>Albums at a time</span><input name="albums_per_batch" type="number" min="1" step="1" style="max-width:120px">
         <small>A sync reads this many new album pages (one by one), downloads those albums, then goes on with the next. 1 = one album at a time.</small></label>
       <label class="check"><input type="checkbox" name="player_links"> Take MP3 addresses from the album page's music player

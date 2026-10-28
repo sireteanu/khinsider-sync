@@ -382,7 +382,7 @@ class Engine:
             if k == "data_dir" and self.data_locked:
                 continue
             if k in ("interrupted_job", "album_places", "album_formats", "album_upgrades", "last_folder_check",
-                     "queue_resume_at", "challenge_retries"):
+                     "queue_resume_at", "challenge_retries", "album_pause_auto", "album_pause_streak"):
                 continue
             if k in ("parallel_max", "sync_every_hours", "full_scan_every_days", "check_folder_days",
                      "pages_per_minute", "files_per_hour", "albums_per_day", "albums_per_batch"):
@@ -393,6 +393,13 @@ class Engine:
             if k in ("resume_interrupted", "album_art", "art_folder", "impersonate", "replace_formats", "player_links",
                      "playlists", "folder_art", "embed_cover", "write_tags"):
                 v = bool(v)
+            if k == "album_pause":
+                v = str(v if v is not None else "auto").strip().lower() or "auto"
+                if v != "auto":
+                    try:
+                        v = str(max(0, int(float(v))))
+                    except ValueError:
+                        raise ValueError("the pause between albums must be auto or a number of seconds")
             if k == "notify_url":
                 v = str(v or "").strip()
                 from .notify import valid
@@ -573,11 +580,18 @@ class Engine:
                         # next one in this job - no gap between albums, one notification at the end
                         while (not self.stop_requested and (summary["sync"].get("next_batch") or 0)
                                and 0 < (summary["sync"].get("resume_at") or 0) <= time.time() + 1):
+                            # a quiet spell after an album's downloads: right after a burst of files the
+                            # next album page got the browser check, a minute later it went through
+                            waited = await self._album_pause(summary["sync"])
+                            if self.stop_requested:
+                                break
                             more = await self._sync(client, robots, None)
                             summary["sync"] = _add_runs(summary["sync"], more)
+                            self._learn_pause(waited, bool(more.get("challenged")))
                         # a browser check: wait and try again by itself, longer each time in a row
                         if summary["sync"].get("challenged") and not self.stop_requested:
-                            self._challenge_backoff()
+                            got = any(summary["sync"].get(k) for k in ("new", "updated", "resumed"))
+                            self._challenge_backoff(fresh=got)
                         elif int(self.catalog.settings().get("challenge_retries") or 0):
                             self.catalog.save_settings({"challenge_retries": 0})
                             log.info("khinsider lets this network read its pages again")
@@ -1426,15 +1440,66 @@ class Engine:
         log.info("The last sync didn't finish (the app was closed or stopped) - continuing it")
         return self.start("sync")
 
-    def _challenge_backoff(self) -> None:
+    def pause_seconds(self, s: Optional[dict] = None) -> float:
+        """The pause between albums: setting `album_pause` - "auto" (what the app has learned,
+        `album_pause_auto`) or seconds (0 = none)."""
+        s = s or self.catalog.settings()
+        v = str(s.get("album_pause", "auto")).strip().lower()
+        if v == "auto":
+            return float(s.get("album_pause_auto") or PAUSE_START)
+        try:
+            return max(0.0, float(v))
+        except ValueError:
+            return float(PAUSE_START)
+
+    async def _album_pause(self, last: dict) -> float:
+        """Wait the pause between albums when the last batch downloaded anything (-> seconds waited)."""
+        if not (last.get("bytes") or 0):
+            return 0.0
+        secs = self.pause_seconds()
+        if secs <= 0:
+            return 0.0
+        self.job["phase"] = "pausing between albums"
+        self.job["pause_until"] = time.time() + secs
+        log.debug("Pausing %.0f s before the next album", secs)
+        end = time.monotonic() + secs
+        while not self.stop_requested and time.monotonic() < end:
+            await asyncio.sleep(min(1.0, end - time.monotonic()))
+        self.job.pop("pause_until", None)
+        return secs
+
+    def _learn_pause(self, waited: float, challenged: bool) -> None:
+        """Automatic pause: a browser check right after it -> longer (by half, at most 5 min); 20 albums
+        in a row without one -> 10 s shorter (at least 20 s)."""
+        s = self.catalog.settings()
+        if not waited or str(s.get("album_pause", "auto")).strip().lower() != "auto":
+            return
+        cur = float(s.get("album_pause_auto") or PAUSE_START)
+        if challenged:
+            new = min(PAUSE_MAX, max(cur + 15, cur * 1.5))
+            self.catalog.save_settings({"album_pause_auto": round(new), "album_pause_streak": 0})
+            log.info("The browser check came even after a %.0f s pause - pausing %.0f s between albums from now on",
+                     cur, new)
+            return
+        streak = int(s.get("album_pause_streak") or 0) + 1
+        if streak >= PAUSE_EASE_AFTER and cur > PAUSE_MIN:
+            new = max(PAUSE_MIN, cur - 10)
+            self.catalog.save_settings({"album_pause_auto": round(new), "album_pause_streak": 0})
+            log.info("%d albums without a browser check - pausing %.0f s between albums now", streak, new)
+        else:
+            self.catalog.save_settings({"album_pause_streak": streak})
+
+    def _challenge_backoff(self, fresh: bool = False) -> None:
         """khinsider's Cloudflare asked for a browser check: no more requests for a while, then the
         sync tries again by itself - 1 min, then 10, 20, 40 ... up to 2 h while it keeps happening.
         Never anything to get around the check: waiting is all it does."""
-        n = int(self.catalog.settings().get("challenge_retries") or 0)
+        # a sync that got files before the check isn't "another check in a row": start from 1 minute
+        n = 0 if fresh else int(self.catalog.settings().get("challenge_retries") or 0)
         wait = CHALLENGE_FIRST if n == 0 else min(CHALLENGE_WAIT * 2 ** (n - 1), CHALLENGE_WAIT_MAX)
         at = time.time() + wait
         self.catalog.save_settings({"queue_resume_at": at, "challenge_retries": n + 1})
-        self.job["message"] = "khinsider asks for a browser check - trying again at " + time.strftime("%H:%M", time.localtime(at))
+        if self.job is not None:
+            self.job["message"] = "khinsider asks for a browser check - trying again at " + time.strftime("%H:%M", time.localtime(at))
         log.warning("Paused for %s because of khinsider's browser check: the sync tries again by itself at %s%s",
                     _span(wait), time.strftime("%a %H:%M", time.localtime(at)),
                     "" if n == 0 else f" (check {n + 1} in a row - the wait doubles each time, up to {_span(CHALLENGE_WAIT_MAX)})")
@@ -1549,6 +1614,12 @@ class Engine:
 # owner's log (October 2026): mostly a single page gets the check - opening an album 18 s later worked;
 # after a heavy night it lasted hours - 2 h between tries costs one page request each
 CHALLENGE_FIRST = 60
+# the pause between albums (setting album_pause "auto"): starts at a minute - what got the next album
+# page through on the owner's connection - grows when a check comes anyway, shrinks while none does
+PAUSE_START = 60
+PAUSE_MIN = 20
+PAUSE_MAX = 300
+PAUSE_EASE_AFTER = 20
 CHALLENGE_WAIT = 600
 CHALLENGE_WAIT_MAX = 2 * 3600
 

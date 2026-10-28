@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.0.25] - 2026-10-28
+
+### New
+- **Pause between albums** (Settings → Go easy on khinsider, Automatic by default): after an album's
+  files, the sync waits before reading the next album's page. Right after a burst of downloads
+  khinsider asked for its browser check every time; a minute later the page went through. Automatic
+  starts at a minute, waits longer when a check comes anyway and shorter while none does. The
+  Activity panel counts it down.
+
+### Fixed
+- A browser check after a sync that had downloaded files counted as "another check in a row", so the
+  next try came after 10 minutes instead of 1.
+
 ## [1.0.24] - 2026-10-28
 
 ### Changed

@@ -53,6 +53,9 @@ DEFAULT_SETTINGS = {
     "pages_per_minute": 60,         # khinsider page requests a minute (album + track pages; 0 = no limit) - pacing.py
     "files_per_hour": 0,            # files downloaded in any hour (0 = no limit); the rest waits
     "albums_per_day": 0,            # albums started in any 24 hours (0 = no limit); the rest waits
+    "album_pause": "auto",          # seconds between albums (0 = none) or "auto": learned, album_pause_auto
+    "album_pause_auto": 60,         # set by the app (album_pause auto)
+    "album_pause_streak": 0,        # set by the app: albums since the last check after a pause
     "albums_per_batch": 1,          # album pages a sync reads (one at a time) before downloading them; then the next batch
     "player_links": True,           # MP3 addresses from the album page's player: no track page for them
     "challenge_retries": 0,         # set by the app: browser checks in a row (each doubles the wait)

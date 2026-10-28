@@ -80,6 +80,10 @@ reads pages too fast - then nothing can be read for a while. In Settings → **G
   by default). For FLAC this is the most files a minute: at 10, about 10 files a minute. A change
   applies at once, also to a sync under way.
 - **Files an hour** and **Albums a day**: spread a long list over hours or days.
+- **Pause between albums** (Automatic by default): a quiet spell after an album's files, before the
+  next album's page. Right after a burst of downloads khinsider tends to ask for its browser check; a
+  minute later the page goes through. Automatic starts at a minute, waits longer when a check comes
+  anyway and gets shorter while none does; the Activity panel counts it down.
 - **Albums at a time** (1 by default): how many new album pages a sync reads before downloading
   those albums. With 1, it reads one album's page, downloads that album, then reads the next - it
   never asks for a pile of pages in a row. It goes straight on with the next albums in the same sync.

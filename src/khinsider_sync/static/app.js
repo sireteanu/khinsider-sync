@@ -734,7 +734,9 @@ function renderStatus(st) {
     const what = { scan: "Scan", read: "Reading album pages", sync: "Sync", "scan+sync": "Scan and sync",
       quick: "Scan for new albums", "quick+sync": "New albums and sync", check: "Check of the download folder" }[job.kind] || job.kind;
     line.textContent = busy
-      ? `${what}: ${outage ? "waiting for khinsider" : job.phase} - started ${clock(job.started)}`
+      ? `${what}: ${outage ? "waiting for khinsider" : job.phase}`
+        + (job.pause_until ? ` (${Math.max(0, Math.round(job.pause_until - Date.now() / 1000))} s - khinsider's check comes right after a burst of files)` : "")
+        + ` - started ${clock(job.started)}`
       : `Last ${what.toLowerCase()} ${job.phase === "done" ? "finished" : job.phase} at ${clock(job.finished || job.started)}`
         + (job.message ? `: ${job.message}` : "");
   } else line.textContent = "No job running.";
@@ -1060,6 +1062,10 @@ $("#btn-settings").addEventListener("click", async () => {
   form.files_per_hour.value = s.files_per_hour || 0;
   form.albums_per_day.value = s.albums_per_day || 0;
   form.albums_per_batch.value = s.albums_per_batch || 1;
+  const pauseV = String(s.album_pause ?? "auto");
+  if (![...form.album_pause.options].some((o) => o.value === pauseV)) form.album_pause.add(new Option(`${pauseV} seconds`, pauseV));
+  form.album_pause.value = pauseV;
+  $("#pause-now").textContent = pauseV === "auto" ? ` (now ${s.album_pause_auto || 60} s)` : "";
   const cd = String(s.check_folder_days || 0);
   if (![...form.check_folder_days.options].some((o) => o.value === cd)) {
     const o = document.createElement("option"); o.value = cd; o.textContent = `Every ${cd} days`; form.check_folder_days.append(o);
@@ -1139,6 +1145,7 @@ $("#settings-save").addEventListener("click", async (e) => {
     files_per_hour: form.files_per_hour.value || 0,
     albums_per_day: form.albums_per_day.value || 0,
     albums_per_batch: Math.max(1, Number(form.albums_per_batch.value) || 1),
+    album_pause: form.album_pause.value,
     outage_wait_hours: form.outage_wait_hours.value || 0,
     resume_interrupted: form.resume_interrupted.checked,
   };

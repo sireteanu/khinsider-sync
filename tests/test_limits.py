@@ -146,3 +146,45 @@ def test_settings_change_the_running_page_rate(site, app_factory):
     assert eng.page_rate.interval == 2.0
     c.post("/api/settings", json={"pages_per_minute": 0})
     assert eng.page_rate.interval == 0
+
+
+def test_a_pause_between_albums(site, app_factory):
+    """After an album's downloads, a quiet spell before the next album's page (khinsider's check came
+    right after a burst of files, a minute later the page went through)."""
+    site.player = True
+    c = app_factory(site, settings={"album_art": False, "albums_per_batch": 1, "album_pause": "2"})
+    scan(c)
+    select(c, "p:windows")                        # 3 albums
+    site.reset_log()
+    t0 = time.monotonic()
+    st = sync(c)
+    assert time.monotonic() - t0 >= 4, "two pauses of 2 s"
+    assert st["sync"]["failed"] == 0 and len({f.split("/")[0] for f in on_disk(c.data)}) == 3
+
+
+def test_the_automatic_pause_learns(site, app_factory):
+    c = app_factory(site, settings={"album_pause": "auto"})
+    eng = c.app.state.engine
+    assert eng.pause_seconds() == 60
+    eng._learn_pause(60, challenged=True)          # a check came anyway: longer
+    assert eng.pause_seconds() == 90
+    for _ in range(20):                            # 20 albums without one: 10 s shorter
+        eng._learn_pause(90, challenged=False)
+    assert eng.pause_seconds() == 80
+    eng._learn_pause(0, challenged=True)           # no pause before it: nothing learned
+    assert eng.pause_seconds() == 80
+    r = c.post("/api/settings", json={"album_pause": "45"}).json()["settings"]
+    assert r["album_pause"] == "45" and eng.pause_seconds() == 45
+    assert c.post("/api/settings", json={"album_pause": "soon"}).status_code == 400
+    assert c.post("/api/settings", json={"album_pause_auto": 1}).json()["settings"]["album_pause_auto"] == 80, \
+        "set by the app only"
+
+
+def test_a_check_after_downloads_starts_the_wait_at_a_minute(site, app_factory):
+    """Files came in before the check: not "another check in a row" - 1 minute, not 10."""
+    c = app_factory(site, settings={"album_art": False, "albums_per_batch": 1})
+    eng = c.app.state.engine
+    eng.catalog.save_settings({"challenge_retries": 3})
+    eng._challenge_backoff(fresh=True)
+    st = c.get("/api/status").json()
+    assert st["challenge_retries"] == 1 and 50 < st["queue_resume_at"] - time.time() < 70
