@@ -1062,10 +1062,10 @@ $("#btn-settings").addEventListener("click", async () => {
   form.files_per_hour.value = s.files_per_hour || 0;
   form.albums_per_day.value = s.albums_per_day || 0;
   form.albums_per_batch.value = s.albums_per_batch || 1;
-  const pauseV = String(s.album_pause ?? "auto");
+  const pauseV = String(s.album_pause ?? "0");
   if (![...form.album_pause.options].some((o) => o.value === pauseV)) form.album_pause.add(new Option(`${pauseV} seconds`, pauseV));
   form.album_pause.value = pauseV;
-  $("#pause-now").textContent = pauseV === "auto" ? ` (now ${s.album_pause_auto || 60} s)` : "";
+  $("#pause-now").textContent = pauseV === "auto" ? ` (now ${s.album_pause_auto ?? 60} s)` : "";
   const cd = String(s.check_folder_days || 0);
   if (![...form.check_folder_days.options].some((o) => o.value === cd)) {
     const o = document.createElement("option"); o.value = cd; o.textContent = `Every ${cd} days`; form.check_folder_days.append(o);

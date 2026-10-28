@@ -1446,7 +1446,8 @@ class Engine:
         s = s or self.catalog.settings()
         v = str(s.get("album_pause", "auto")).strip().lower()
         if v == "auto":
-            return float(s.get("album_pause_auto") or PAUSE_START)
+            learned = s.get("album_pause_auto")
+            return float(PAUSE_START if learned is None or learned == "" else learned)
         try:
             return max(0.0, float(v))
         except ValueError:
@@ -1469,12 +1470,19 @@ class Engine:
         return secs
 
     def _learn_pause(self, waited: float, challenged: bool) -> None:
-        """Automatic pause: a browser check right after it -> longer (by half, at most 5 min); 20 albums
-        in a row without one -> 10 s shorter (at least 20 s)."""
+        """Automatic pause: a browser check right after it -> longer (by half, at most 5 min) - and still
+        one after 5 min: no pause any more (it doesn't help); 20 albums in a row without one -> 10 s
+        shorter (at least 20 s)."""
         s = self.catalog.settings()
         if not waited or str(s.get("album_pause", "auto")).strip().lower() != "auto":
             return
-        cur = float(s.get("album_pause_auto") or PAUSE_START)
+        cur = float(s.get("album_pause_auto") if s.get("album_pause_auto") not in (None, "") else PAUSE_START)
+        if challenged and cur >= PAUSE_MAX:
+            # the check comes even after the longest pause: pausing doesn't keep it away here
+            self.catalog.save_settings({"album_pause_auto": 0, "album_pause_streak": 0})
+            log.info("The browser check came even after a %.0f s pause - pausing doesn't help on this "
+                     "connection, so no pause between albums from now on", cur)
+            return
         if challenged:
             new = min(PAUSE_MAX, max(cur + 15, cur * 1.5))
             self.catalog.save_settings({"album_pause_auto": round(new), "album_pause_streak": 0})

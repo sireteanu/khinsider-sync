@@ -83,8 +83,10 @@ tests/  conftest (app_factory + API helpers), mock_site, fixtures/ (real markup 
   same request. Often a single request gets it: a sync's album page was checked at 9:50:33, opening
   another album by hand at 9:50:51 went through. What brings it on: a burst of file downloads (92 MP3s
   in 12 s at 8 parallel) right before the next album page - that page got the check every time, a
-  minute later it went through. Hence the pause between albums (`album_pause`, `Engine._album_pause`,
-  learned by `_learn_pause`) and a check after a sync that got files starts the wait at 1 min again.
+  minute later it went through. A pause between albums (`album_pause`, `Engine._album_pause`, learned
+  by `_learn_pause`) did NOT help: the check came after a 5-minute pause too, every album (2-3 PM,
+  Oct 28) - default none; auto drops to 0 once a check follows the longest pause. What gets through
+  is the 1-minute retry (a new job); a check after a sync that got files starts the wait at 1 min again.
   robots.txt comes as text/html.
 - Sizes are shown in MB with two decimals ("5.64 MB"); totals use thousands commas ("1,438 MB").
   No per-file dates: files get the album's Date Added (12:00 local time).

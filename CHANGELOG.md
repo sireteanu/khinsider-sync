@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.26] - 2026-10-28
+
+### Changed
+- **Pause between albums** is off by default. On the owner's connection the browser check came after
+  every album even with a 5-minute pause, so pausing only made the sync slower; the retry a minute
+  after a check is what gets the next album through. Automatic pausing now stops by itself once a
+  check comes even after its longest pause.
+
 ## [1.0.25] - 2026-10-28
 
 ### New

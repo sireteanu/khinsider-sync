@@ -173,6 +173,10 @@ def test_the_automatic_pause_learns(site, app_factory):
     assert eng.pause_seconds() == 80
     eng._learn_pause(0, challenged=True)           # no pause before it: nothing learned
     assert eng.pause_seconds() == 80
+    eng.catalog.save_settings({"album_pause_auto": 300})
+    eng._learn_pause(300, challenged=True)         # a check even after the longest pause: it doesn't help
+    assert eng.pause_seconds() == 0
+    eng.catalog.save_settings({"album_pause_auto": 80})
     r = c.post("/api/settings", json={"album_pause": "45"}).json()["settings"]
     assert r["album_pause"] == "45" and eng.pause_seconds() == 45
     assert c.post("/api/settings", json={"album_pause": "soon"}).status_code == 400
@@ -188,3 +192,8 @@ def test_a_check_after_downloads_starts_the_wait_at_a_minute(site, app_factory):
     eng._challenge_backoff(fresh=True)
     st = c.get("/api/status").json()
     assert st["challenge_retries"] == 1 and 50 < st["queue_resume_at"] - time.time() < 70
+
+
+def test_no_pause_by_default():
+    from khinsider_sync.catalog import DEFAULT_SETTINGS
+    assert DEFAULT_SETTINGS["album_pause"] == "0"
