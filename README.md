@@ -49,7 +49,7 @@ modest, don't sync the whole site, and consider [donating](https://downloads.khi
 | Selection | Tick an album, or tick a platform for **every album of it, including ones added later** (optionally only some album types, e.g. gamerips). Untick single albums of a ticked platform as exceptions. Ticks are saved immediately. |
 | Album details | Click an album: its tracks per disc with every format and size, its images, what is synced, where it is saved. The album's page is read the first time you open it. |
 | Formats | **Your own list, in your order**: tick the formats you want (and the album images) and move them up or down; an album gets either only the first ticked format it has, or every ticked one (e.g. FLAC *and* MP3). Files download in that order - every FLAC file of the sync before the first MP3. Quick picks: MP3 (default), FLAC else MP3, FLAC and MP3, best quality (FLAC → WAV → … → M4A → OPUS → OGG → MP3), everything. Any album can have **its own formats** (e.g. FLAC for favourites). Album images (covers, scans) are saved too unless you turn that off, optionally in an `Art` folder. |
-| Track names | As khinsider names them (`1-01. Title.mp3`), or numbered from the album page's disc and track columns (`01 - Title.mp3`, `1-01 - Title.flac`). |
+| Track names | As khinsider names them (`1-01. Title.mp3`), or numbered from the album page's disc and track columns (`01 - Title.mp3`, `1-01 - Title.flac`). A title that already ends in an extension (`Title.mp3`) doesn't get it twice. |
 | Getting through | Requests look like Chrome (its TLS fingerprint and headers, via curl_cffi) and name khinsider as the Referer, as khi-explorer does, so Cloudflare's bot protection lets them through. Can be turned off. Optionally **FlareSolverr** gets a page past Cloudflare's browser check when one comes (see Syncing). |
 | Folders | One folder per album, named after the album (clashing names get the type and year added). Optionally grouped by platform, type or year. **Saved as** puts one album anywhere you like. Changing either **moves** what you already have instead of downloading it again. |
 | Sync | Reads each ticked album's page once (the first time it's synced or opened), then downloads what's missing or half-finished (`.part`, resumed). khinsider doesn't change albums once they're up, so **an album that is downloaded is done**: later syncs skip it without a request or a look at the disk. |
@@ -256,7 +256,7 @@ doesn't change albums). For every file of the other ticked albums (formats as ab
   file servers, which didn't ask for the check in October 2026.
 - **FlareSolverr** (optional, Settings → FlareSolverr address, or `FLARESOLVERR_URL`): when a page gets
   the check, the app asks a [FlareSolverr](https://github.com/FlareSolverr/FlareSolverr) server for that
-  page (one request at a time; GET pages only - never files or the sign-in). Its `cf_clearance` cookie
+  page (one request at a time; GET pages only - never files or the sign-in), handing it the app's own khinsider cookies so account pages come back signed in. Its `cf_clearance` cookie
   goes into the client's one cookie store and its User-Agent goes out with every later khinsider
   request, the page is asked for again directly, and the following pages normally go through with it.
   The cookie is kept between jobs. If direct requests still get the check, every checked page comes from

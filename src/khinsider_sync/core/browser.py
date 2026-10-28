@@ -142,6 +142,8 @@ _warned = False
 
 def _jar(client: httpx.AsyncClient):
     t = getattr(client, "_transport", None)
+    while not isinstance(t, ChromeTransport) and getattr(t, "inner", None) is not None:
+        t = t.inner                            # a wrapper (solver.SolverTransport): the transport inside
     return t.session.cookies if isinstance(t, ChromeTransport) else None
 
 

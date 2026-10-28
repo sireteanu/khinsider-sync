@@ -50,7 +50,7 @@ the most recently added to khinsider first), or the oldest, the largest, or by n
   order: all the FLAC files first, then the MP3s. The buttons above the list fill it in for you.
   FLAC is often 3 to 5 times bigger.
 - **Track names**: as khinsider names them, or `01 - Title.mp3` / `1-01 - Title.flac` from the
-  album's disc and track numbers.
+  album's disc and track numbers (a title already ending in `.mp3` doesn't get it twice).
 - **Art folder**: put the images in an `Art` folder inside each album's folder.
 - **Playlist** and **folder.jpg**: a playlist and the album's cover (the picture khinsider shows for it,
   also when you don't sync images; PNG covers are turned into a JPEG) in each downloaded album's

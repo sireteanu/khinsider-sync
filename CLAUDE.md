@@ -48,7 +48,9 @@ src/khinsider_sync/
                 SolverTransport wraps the client's transport; on a browser check (GET khinsider pages only)
                 asks FlareSolverr, puts its cookie into the ONE cookie store and its User-Agent on later
                 requests (SolveState on the Engine, kept between jobs), retries directly; if still checked,
-                FlareSolverr's own copy of each checked page (html_only). Failure: 60 s cooldown, usual wait
+                FlareSolverr's own copy of each checked page (html_only). Failure: 60 s cooldown, usual wait.
+                FlareSolverr gets the client's khinsider cookies (account session). browser._jar unwraps
+                `.inner` - without that, account cookies landed in httpx's dropped jar (1.0.31 bug)
     browser.py  ChromeTransport (httpx transport over curl_cffi impersonating Chrome; maps curl errors
                 to httpx exceptions, drops content-encoding because curl already decoded; curl's
                 session alone handles cookies - httpx's Cookie header is dropped)

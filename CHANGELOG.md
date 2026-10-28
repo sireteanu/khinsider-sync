@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.0.32] - 2026-10-28
+
+### Fixed
+- **Album zips work again with FlareSolverr set.** Since 1.0.31 the khinsider account's session cookie
+  wasn't sent with requests, so every account page came back signed out and albums went file by file
+  ("khinsider's login page has no login form"). FlareSolverr now also gets your session, so pages it
+  fetches for the account come back signed in.
+- **Numbered track names no longer double the extension** when khinsider's title already ends in it
+  ("01 - 01 Title.mp3.mp3" is now "01 - 01 Title.mp3"). Files already saved under the doubled name
+  are renamed by the next sync - nothing is downloaded again.
+
 ## [1.0.31] - 2026-10-28
 
 ### New

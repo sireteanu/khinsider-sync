@@ -196,6 +196,7 @@ class MockSite:
         self.challenge = False             # pages answer Cloudflare's browser check (403, cf-mitigated)
         self.solver = "ok"                 # mock FlareSolverr: ok | html | fail (see the docstring)
         self.solver_calls: list = []
+        self.solver_cookies: list = []     # names of the cookies each FlareSolverr request carried
         self.robots_extra = ""             # more robots.txt lines
         self.broken_images: set = set()    # image names that answer 404 (listed on the page, file gone)
         self.player = True                 # album pages carry the music player's packed track list
@@ -679,7 +680,11 @@ class MockSite:
         import urllib.error
         import urllib.request
         try:
-            with urllib.request.urlopen(urllib.request.Request(req["url"], headers={"X-Mock-Browser": "1"})) as r:
+            headers = {"X-Mock-Browser": "1"}
+            if req.get("cookies"):                         # cookies handed to FlareSolverr go along
+                headers["Cookie"] = "; ".join(f"{c['name']}={c['value']}" for c in req["cookies"])
+            self.solver_cookies.append({c["name"] for c in req.get("cookies") or []})
+            with urllib.request.urlopen(urllib.request.Request(req["url"], headers=headers)) as r:
                 status, final, html = r.status, r.geturl(), r.read().decode()
         except urllib.error.HTTPError as e:
             status, final, html = e.code, req["url"], e.read().decode()

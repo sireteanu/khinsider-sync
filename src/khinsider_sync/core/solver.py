@@ -73,10 +73,14 @@ class FlareSolverr:
         return {"ok": ok, "version": str(data.get("version") or ""),
                 "message": str(data.get("msg") or f"HTTP {r.status_code}")}
 
-    async def get(self, url: str, user_agent: str = "") -> Optional[dict]:
+    async def get(self, url: str, user_agent: str = "", cookies: Optional[dict] = None) -> Optional[dict]:
         """FlareSolverr's `solution` for `url` ({url, status, headers, response, cookies, userAgent})
         or None when it couldn't get the page."""
         body = {"cmd": "request.get", "url": url, "maxTimeout": self.timeout_ms}
+        if cookies:
+            # the client's own cookies go along - a signed-in khinsider account's session above all, so
+            # its pages (/cp/add_album ...) come back signed in
+            body["cookies"] = [{"name": k, "value": v} for k, v in cookies.items()]
         try:
             async with httpx.AsyncClient(timeout=self.timeout_ms / 1000 + 15) as c:
                 r = await c.post(self.url + "/v1", json=body)
@@ -123,6 +127,21 @@ class SolverTransport(httpx.AsyncBaseTransport):
     @property
     def _curl(self):
         return self.inner.session.cookies if isinstance(self.inner, browser.ChromeTransport) else None
+
+    def _cookies_for(self, request: httpx.Request) -> dict:
+        """The cookies this request carries for khinsider (curl's session, or the request's Cookie header)."""
+        out = {}
+        if self._curl is not None:
+            for c in self._curl.jar:
+                d = (c.domain or "").lstrip(".")
+                if not d or self.host == d or self.host.endswith("." + d):
+                    out[c.name] = c.value
+        else:
+            for part in (request.headers.get("cookie") or "").split(";"):
+                k, _, v = part.strip().partition("=")
+                if k:
+                    out[k] = v
+        return out
 
     def _sync_jar(self) -> None:
         if self._curl is not None and self.state.solved_at and self._seen != self.state.solved_at:
@@ -195,7 +214,7 @@ class SolverTransport(httpx.AsyncBaseTransport):
         if time.time() - st.failed_at < self.cooldown:
             return None                                    # it just failed: wait as usual
         log.info("Cloudflare browser check on %s - asking FlareSolverr", request.url.path)
-        sol = await self.solver.get(str(request.url), st.user_agent)
+        sol = await self.solver.get(str(request.url), st.user_agent, self._cookies_for(request))
         if not sol:
             st.failed_at = time.time()
         return sol

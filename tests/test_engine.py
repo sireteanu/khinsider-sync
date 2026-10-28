@@ -797,3 +797,33 @@ def test_a_download_record_from_1_0_0_is_taken_over(tmp_path):
     rec = m.get("A/x.mp3")
     assert rec.page_date == "2025-01-01" and rec.page_size == "0.01 MB"
     m.close()
+
+
+def test_a_title_ending_in_its_extension_isnt_named_twice(site, app_factory, monkeypatch):
+    """khinsider titles like "01 Title.mp3" made "01 - 01 Title.mp3.mp3" (fixed 1.0.32); files saved
+    under the old name are renamed by the next sync, not downloaded again."""
+    from khinsider_sync import engine as eng_mod
+    from khinsider_sync.engine import track_name
+    assert track_name({"title": "01 Title.mp3", "num": "1", "ext": ".mp3"}) == "01 - 01 Title.mp3"
+    assert track_name({"title": "Song.MP3", "num": "2", "ext": ".flac"}) == "02 - Song.flac"
+    assert track_name({"title": "v1.5", "num": "3", "ext": ".mp3"}) == "03 - v1.5.mp3"
+    site.albums[SMW]["tracks"][1] = ("", "2", "02. Title Screen", "Title Screen.mp3", "0:46")
+    real = eng_mod.track_name
+    monkeypatch.setattr(eng_mod, "track_name",                       # how 1.0.31 named it
+                        lambda f: eng_mod.safe_segment(f"{f['num'].zfill(2)} - {f['title']}{f['ext']}")
+                        if f.get("title") else real(f))
+    c = app_factory(site, settings={"track_names": "numbered"})
+    scan(c)
+    select(c, "a:" + SMW)
+    sync(c)
+    assert "Super Mario World/02 - Title Screen.mp3.mp3" in on_disk(c.data)
+    c.__exit__(None, None, None)
+    monkeypatch.setattr(eng_mod, "track_name", real)                 # the new version starts
+    c2 = app_factory(site, name="config")
+    site.reset_log()
+    st = sync(c2)
+    files = on_disk(c2.data)
+    assert "Super Mario World/02 - Title Screen.mp3" in files
+    assert "Super Mario World/02 - Title Screen.mp3.mp3" not in files
+    assert not site.file_requests(), "renamed, not downloaded again"
+    assert st["sync"]["failed"] == 0

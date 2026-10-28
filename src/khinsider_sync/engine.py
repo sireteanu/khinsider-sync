@@ -22,7 +22,7 @@ from .core.constants import RETRY_STATUSES
 from .core.download import DONE_WORD, Downloader, ResolveError, run_item
 from .core.limits import DownloadGate, RateLimit, _retry_after
 from .core.sync import MANIFEST_NAME, FileInfo, Manifest, size_range, stamp_file, stamp_folders
-from .core.util import CHALLENGE_MESSAGE, ChallengeError, fmt_bytes, is_challenge, parse_size, safe_segment
+from .core.util import CHALLENGE_MESSAGE, ChallengeError, extension, fmt_bytes, is_challenge, parse_size, safe_segment
 
 from . import __version__, parse
 from . import account as account_mod
@@ -83,6 +83,9 @@ def track_name(f: dict) -> str:
     the album page's CD and # columns; without a # column the track's place in the list counts.
     Falls back to khinsider's file name when the track has no title."""
     title = (f.get("title") or "").strip()
+    # some khinsider titles end in the file's extension ("01 Title.mp3"): don't add it twice
+    while extension(title) in AUDIO_EXTENSIONS:
+        title = title[:-len(extension(title))].rstrip()
     if not title:
         return f["name"]
     num = (f.get("num") or "").strip().rstrip(".")

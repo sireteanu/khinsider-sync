@@ -115,3 +115,41 @@ def test_without_curl_cffi_the_plain_client_works_too(site, app_factory):
     st = scan(c)
     assert st["job"]["phase"] == "done" and len(site.solver_calls) == 1
     assert albums(c)
+
+
+def test_account_pages_come_signed_in_through_flaresolverr(site, app_factory):
+    """FlareSolverr's copy of /cp/add_album must be signed in: the client's session cookies go along."""
+    from conftest import SMW
+    site.accounts["fan"] = ("secret", True)
+    c = app_factory(site, settings=solver_settings(site, account_user="fan", account_password="secret"))
+    scan(c)
+    select(c, "a:" + SMW)
+    c.post("/api/read", json={})
+    wait(c)
+    assert c.post("/api/account/check").json()["state"] in ("ok", "signed_in")   # signed in before the check
+    site.challenge = True
+    site.solver = "html"                          # every checked page comes from FlareSolverr's copy
+    st = sync(c)
+    zips = [p for p, _ in site.requests if p.lower().endswith(".zip")]
+    assert any("xf_user" in names for names in site.solver_cookies), site.solver_cookies
+    assert len(zips) == 1, "the album came as its zip, not file by file"
+    assert st["sync"]["failed"] == 0
+    assert any("xf_user" in names for names in site.solver_cookies), site.solver_cookies
+    assert not any("login page has no login form" in m for m in log_lines(st))
+
+
+def test_account_cookies_reach_curls_session_through_the_wrapper(site, app_factory):
+    """1.0.31 regression: with FlareSolverr set, the account's session cookie went into httpx's jar,
+    whose Cookie header ChromeTransport drops - every account page came back signed out."""
+    from conftest import SMW
+    site.accounts["fan"] = ("secret", True)
+    c = app_factory(site, settings=solver_settings(site, account_user="fan", account_password="secret"))
+    scan(c)
+    select(c, "a:" + SMW)
+    st = sync(c)                                  # no browser check at all
+    zips = [p for p, _ in site.requests if p.lower().endswith(".zip")]
+    assert len(zips) == 1 and st["sync"]["failed"] == 0
+    login = max(i for i, (p, _) in enumerate(site.requests) if p.startswith("/forums/index.php"))
+    cp = [h for p, h in site.requests[login:] if p.startswith("/cp/")]      # once signed in
+    assert cp and all("xf_user=" in h.get("Cookie", "") for h in cp)
+    assert all(h.get("Cookie", "").count("xf_user=") == 1 for h in cp), "one Cookie header, one copy"
