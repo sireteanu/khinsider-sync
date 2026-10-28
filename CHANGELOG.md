@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.0.27] - 2026-10-28
+
+### Fixed
+- **The cause of the constant Cloudflare browser checks in syncs.** With "Look like Chrome" on, every
+  request after the first one of a connection sent khinsider's `__cf_bm` cookie twice (two Cookie
+  headers - something no browser does). The first album page went through, the next one got the check:
+  that's why opening an album by hand (a new connection each time) always worked while a sync
+  stopped after every album. Cookies now go out once, as a browser sends them.
+
 ## [1.0.26] - 2026-10-28
 
 ### Changed

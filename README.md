@@ -459,6 +459,7 @@ Verified in a browser (October 2026). If the site changes, these are the first t
 - Track pages: `/game-soundtracks/album/<slug>/<file name encoded twice>.mp3`, links
   `.songDownloadLink` per format to `https://<server>.vgmtreasurechest.com/soundtracks/<slug>/<token>/<file>`.
 - Track sizes in MB with two decimals; totals with thousands commas.
+- Cloudflare sets a `__cf_bm` cookie on the first page; it has to go back once per request, as a browser sends it (two Cookie headers got every later page the browser check - fixed in 1.0.27).
 - `robots.txt` only disallows `/unavailable`; it is sent as `text/html`, so it is read by its content.
 - Cloudflare protects the pages: from a data-center address (a cloud server) every page answers with the
   "Just a moment..." browser check (403, `cf-mitigated: challenge`) whatever the client looks like,

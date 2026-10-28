@@ -43,7 +43,8 @@ src/khinsider_sync/
     sync.py     FileInfo, Manifest (<data>/.khinsider-sync.db, by_url()/move()), plan()
     limits.py   Limiter (page pacing), DownloadGate (auto parallel downloads), RateLimit
     browser.py  ChromeTransport (httpx transport over curl_cffi impersonating Chrome; maps curl errors
-                to httpx exceptions, drops content-encoding because curl already decoded)
+                to httpx exceptions, drops content-encoding because curl already decoded; curl's
+                session alone handles cookies - httpx's Cookie header is dropped)
     util.py / constants.py (formats, BEST_ORDER, MAGIC) / config.py
 tests/  conftest (app_factory + API helpers), mock_site, fixtures/ (real markup samples),
         test_parse, test_app, test_engine, test_cleanup, test_changes, test_outage
@@ -87,6 +88,10 @@ tests/  conftest (app_factory + API helpers), mock_site, fixtures/ (real markup 
   by `_learn_pause`) did NOT help: the check came after a 5-minute pause too, every album (2-3 PM,
   Oct 28) - default none; auto drops to 0 once a check follows the longest pause. What gets through
   is the 1-minute retry (a new job); a check after a sync that got files starts the wait at 1 min again.
+  **The real cause (fixed 1.0.27):** `ChromeTransport` passed httpx's Cookie header on top of curl's own
+  cookie jar, so every request after the first carried `__cf_bm` twice (two Cookie headers). First page
+  of a connection (manual open, retry in a new job) went through, the second got the check.
+  `tests/test_browser.py` checks what really goes out. Never let two layers both handle cookies.
   robots.txt comes as text/html.
 - Sizes are shown in MB with two decimals ("5.64 MB"); totals use thousands commas ("1,438 MB").
   No per-file dates: files get the album's Date Added (12:00 local time).

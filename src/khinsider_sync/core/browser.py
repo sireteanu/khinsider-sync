@@ -22,8 +22,10 @@ except ImportError:                            # pragma: no cover - depends on t
     cerr = None
 
 IMPERSONATE = "chrome"
-# headers httpx adds by itself; curl_cffi sends Chrome's own instead
-_DROP = {"host", "connection", "content-length", "accept-encoding", "transfer-encoding"}
+# headers httpx adds by itself; curl_cffi sends Chrome's own instead. "cookie" too: curl's session keeps
+# the cookies and sends them itself - httpx's copy on top made every request after the first carry two
+# Cookie headers (no browser does that), and from the second page on Cloudflare asked for its check
+_DROP = {"host", "connection", "content-length", "accept-encoding", "transfer-encoding", "cookie"}
 
 
 def _map_error(e: Exception, request: httpx.Request) -> httpx.HTTPError:
