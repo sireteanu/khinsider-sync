@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.0.20] - 2026-10-27
+
+### New
+- After a Cloudflare browser check, the sync pauses and **tries again by itself**: after 30 minutes,
+  then 1, 2, 4 and up to 8 hours while the check keeps coming, and back to 30 minutes once pages come
+  through again. The Activity panel says when. Before, it stopped and waited for you to click Sync.
+
+### Fixed
+- A browser check on a track page let a long list go straight on to the next album, which got the
+  same check.
+
 ## [1.0.19] - 2026-10-27
 
 ### Fixed

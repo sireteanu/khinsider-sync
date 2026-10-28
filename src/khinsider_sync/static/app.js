@@ -762,7 +762,9 @@ function renderStatus(st) {
   renderLeftovers(st.leftovers, busy);
   const when = (t) => new Date(t * 1000).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" });
   $("#next-run").textContent = st.queue_resume_at && !busy
-    ? `A limit stopped the sync - it carries on by itself ${when(st.queue_resume_at)}`
+    ? (st.challenge_retries
+        ? `khinsider asked for a browser check - the sync waits and tries again by itself ${when(st.queue_resume_at)}`
+        : `A limit stopped the sync - it carries on by itself ${when(st.queue_resume_at)}`)
       + (sel.albums - sel.downloaded > 0 ? ` (${nAlbums(sel.albums - sel.downloaded)} still to download)` : "")
     : st.next_run ? `Next automatic sync at ${new Date(st.next_run * 1000).toLocaleString()}` : "";
 

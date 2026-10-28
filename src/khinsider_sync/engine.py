@@ -127,6 +127,7 @@ class Resolver:
         self.locks: dict = {}
         self.keep = keep
         self.requests = 0
+        self.challenged = False                # a track page got Cloudflare's browser check
 
     async def __call__(self, url: str) -> str:
         page = self.pages.get(url)
@@ -151,6 +152,7 @@ class Resolver:
                 await self.page_rate.wait()
             r = await self.client.get(page)
             if is_challenge(r.status_code, r.headers):
+                self.challenged = True
                 raise ResolveError(f"track page: HTTP {r.status_code} (Cloudflare browser check)", status=r.status_code,
                                    pause=CHALLENGE_MESSAGE.format(status=r.status_code))
             if r.status_code != 200:
@@ -362,7 +364,7 @@ class Engine:
             if k == "data_dir" and self.data_locked:
                 continue
             if k in ("interrupted_job", "album_places", "album_formats", "album_upgrades", "last_folder_check",
-                     "queue_resume_at"):
+                     "queue_resume_at", "challenge_retries"):
                 continue
             if k in ("parallel_max", "sync_every_hours", "full_scan_every_days", "check_folder_days",
                      "pages_per_minute", "files_per_hour", "albums_per_day", "albums_per_batch"):
@@ -554,8 +556,14 @@ class Engine:
                                and 0 < (summary["sync"].get("resume_at") or 0) <= time.time() + 1):
                             more = await self._sync(client, robots, None)
                             summary["sync"] = _add_runs(summary["sync"], more)
+                        # a browser check: wait and try again by itself, longer each time in a row
+                        if summary["sync"].get("challenged") and not self.stop_requested:
+                            self._challenge_backoff()
+                        elif int(self.catalog.settings().get("challenge_retries") or 0):
+                            self.catalog.save_settings({"challenge_retries": 0})
+                            log.info("khinsider lets this network read its pages again")
             self.job["phase"] = "stopped" if self.stop_requested else "done"
-            if self.scanner is not None and self.scanner.challenged:
+            if self.scanner is not None and self.scanner.challenged and "browser check" not in (self.job.get("message") or ""):
                 self.job["message"] = "khinsider asks for a browser check (Cloudflare) - see the log"
         except Exception as e:
             log.exception("job failed: %r", e)
@@ -902,11 +910,13 @@ class Engine:
                 resume = hour.free_at()
             if held:
                 resume = max(resume, day.free_at()) if self.limit_hit else day.free_at()
-            if later and not resume:
+            if later and not resume and not resolver.challenged:
                 resume = time.time()             # the next batch right away
         self.catalog.save_settings({"queue_resume_at": resume})
         summary["waiting_albums"] = len(held)
         summary["next_batch"] = len(later)
+        if resolver.challenged:
+            summary["challenged"] = True
         summary["resume_at"] = resume
         names = self.catalog.albums_by_slug({a for a in got if a})
         summary["got_albums"] = sorted(names[a]["name"] for a in names)
@@ -1381,14 +1391,29 @@ class Engine:
         log.info("The last sync didn't finish (the app was closed or stopped) - continuing it")
         return self.start("sync")
 
+    def _challenge_backoff(self) -> None:
+        """khinsider's Cloudflare asked for a browser check: no more requests for a while, then the
+        sync tries again by itself - 30 min, 1 h, 2 h ... up to 8 h while it keeps happening. Never
+        anything to get around the check: waiting is all it does."""
+        n = int(self.catalog.settings().get("challenge_retries") or 0)
+        wait = min(CHALLENGE_WAIT * 2 ** n, CHALLENGE_WAIT_MAX)
+        at = time.time() + wait
+        self.catalog.save_settings({"queue_resume_at": at, "challenge_retries": n + 1})
+        self.job["message"] = "khinsider asks for a browser check - trying again at " + time.strftime("%H:%M", time.localtime(at))
+        log.warning("Paused for %s because of khinsider's browser check: the sync tries again by itself at %s%s",
+                    _span(wait), time.strftime("%a %H:%M", time.localtime(at)),
+                    "" if n == 0 else f" (check {n + 1} in a row - the wait doubles each time, up to {_span(CHALLENGE_WAIT_MAX)})")
+
     def resume_queue(self) -> bool:
-        """A files-per-hour / albums-per-day limit stopped the last sync and there's room again:
-        carry on (called by the scheduler every 30 s)."""
-        resume = float(self.catalog.settings().get("queue_resume_at") or 0)
+        """A files-per-hour / albums-per-day limit or a browser check stopped the last sync and it's
+        time again: carry on (called by the scheduler every 30 s)."""
+        s = self.catalog.settings()
+        resume = float(s.get("queue_resume_at") or 0)
         if not resume or time.time() < resume or self.busy:
             return False
         self.catalog.save_settings({"queue_resume_at": 0})
-        log.info("Carrying on with the queue (a limit had stopped the last sync)")
+        log.info("Trying again after khinsider's browser check" if int(s.get("challenge_retries") or 0)
+                 else "Carrying on with the queue (a limit had stopped the last sync)")
         return self.start("sync", scheduled=True)
 
     async def scheduler_loop(self, resume_delay: float = 3.0) -> None:
@@ -1444,6 +1469,7 @@ class Engine:
             "selection": self.selection(),
             "next_run": self.next_run,
             "queue_resume_at": float(s.get("queue_resume_at") or 0) or None,
+            "challenge_retries": int(s.get("challenge_retries") or 0),
             "limits": {k: int(s.get(k) or 0) for k in ("pages_per_minute", "files_per_hour", "albums_per_day")},
             "leftovers": self.leftovers,
             "data_dir": s["data_dir"],
@@ -1482,6 +1508,14 @@ class Engine:
                                gate=g.describe() if g else "",
                                active=[{"rel": r, "have": h, "total": t} for r, (h, t) in active[:100]])
         return out
+
+
+CHALLENGE_WAIT = 1800          # first wait after a browser check (s); doubles while it keeps happening
+CHALLENGE_WAIT_MAX = 8 * 3600
+
+
+def _span(secs: float) -> str:
+    return f"{secs / 3600:g} hours" if secs >= 3600 * 2 else f"{secs / 3600:g} hour" if secs >= 3600 else f"{secs / 60:g} minutes"
 
 
 _RUN_SUMS = ("total", "albums", "to_fetch", "new", "updated", "resumed", "up to date", "already in folder",

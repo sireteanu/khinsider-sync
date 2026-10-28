@@ -54,6 +54,7 @@ DEFAULT_SETTINGS = {
     "files_per_hour": 0,            # files downloaded in any hour (0 = no limit); the rest waits
     "albums_per_day": 0,            # albums started in any 24 hours (0 = no limit); the rest waits
     "albums_per_batch": 1,          # album pages a sync reads (one at a time) before downloading them; then the next batch
+    "challenge_retries": 0,         # set by the app: browser checks in a row (each doubles the wait)
     "queue_resume_at": 0,           # set by the app: a limit stopped a sync - it carries on at this time
     "check_folder_days": 0,         # with the schedule on: check the download folder for deleted files before a
                                     # scheduled sync when the last check is this many days old (0 = never: disks stay asleep)

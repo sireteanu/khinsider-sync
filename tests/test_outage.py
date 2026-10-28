@@ -124,3 +124,54 @@ def test_robots_txt_is_not_asked_for_in_front_of_page_requests(site, app_factory
     sync(c)
     robots = [p for p, _ in site.requests if p == "/robots.txt"]
     assert len(robots) == 1, "kept for a day"
+
+
+def test_a_browser_check_waits_and_tries_again_by_itself(site, app_factory):
+    """A browser check pauses the sync and it tries again by itself: 30 min, then 1 h, 2 h ... up
+    to 8 h while it keeps happening; once pages come through again, back to the start."""
+    c = app_factory(site, settings={"album_art": False})
+    eng = c.app.state.engine
+    scan(c)
+    select(c, "p:windows")
+    site.challenge = True
+    t0 = time.time()
+    st = sync(c)                                   # the album page gets the check
+    assert 1790 < st["queue_resume_at"] - t0 < 1810 and st["challenge_retries"] == 1
+    assert "trying again at" in st["job"]["message"]
+    assert any("Paused for 30 minutes because of khinsider's browser check" in m for m in log_lines(st))
+    assert not eng.resume_queue(), "not before its time"
+    waits = []
+    for _ in range(5):                             # still checked: the wait doubles, up to 8 hours
+        eng.catalog.save_settings({"queue_resume_at": time.time() - 1})
+        assert c.portal.call(eng.resume_queue)
+        st = wait(c)
+        waits.append(round((st["queue_resume_at"] - time.time()) / 1800))
+    assert waits == [2, 4, 8, 16, 16], waits
+    assert any("Trying again after khinsider's browser check" in m for m in log_lines(st))
+    site.challenge = False                         # through again: downloads, and the count starts over
+    eng.catalog.save_settings({"queue_resume_at": time.time() - 1})
+    assert c.portal.call(eng.resume_queue)
+    st = wait(c)
+    assert st["challenge_retries"] == 0 and not st["queue_resume_at"]
+    assert st["sync"]["new"] and st["sync"]["failed"] == 0
+    assert len({f.split("/")[0] for f in on_disk(c.data)}) == 3
+
+
+def test_a_browser_check_on_track_pages_also_waits(site, app_factory):
+    c = app_factory(site, settings={"album_art": False})
+    scan(c)
+    select(c, "p:windows")
+    c.post("/api/read", json={})
+    wait(c)
+    site.challenge = True                          # album pages read; track pages get the check
+    st = sync(c)
+    assert st["challenge_retries"] == 1 and st["queue_resume_at"] > time.time() + 1700
+    assert st["sync"]["failed"] == 0
+
+
+def test_stop_doesnt_set_a_wait(site, app_factory):
+    c = app_factory(site)
+    scan(c)
+    select(c, "a:persona-5")
+    st = sync(c)
+    assert not st["queue_resume_at"] and st["challenge_retries"] == 0
