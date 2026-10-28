@@ -45,7 +45,7 @@ modest, don't sync the whole site, and consider [donating](https://downloads.khi
 | Area | What it does |
 |---|---|
 | Catalog | **Scan site** reads khinsider's album lists (about 230 pages for 106,000+ albums: name, platforms, type, year) and its platform list. No album pages and no music are requested while scanning. **Scan for new albums** (☰ menu, and every scheduled sync between full scans) reads only the home page's newest additions - usually one page. |
-| Browsing | Platforms on the left with album counts (of the chosen album type when the type filter is set); the album list - every album of the view in one scrolling list, fetched a slice at a time as you scroll, with an A–Z strip beside it that jumps to a letter (sorting by name first if needed) - with search, type filter (tick one or several: Gamerip, Soundtrack, Arrangement …; "No type" for albums without one), "Ticked / With synced files / With problems" filters, and sorting by name, year, size or how much is synced. |
+| Browsing | Platforms on the left with album counts (of the chosen album type when the type filter is set); the album list - every album of the view in one scrolling list, fetched a slice at a time as you scroll, with an A–Z strip beside it that jumps to a letter (sorting by name first if needed) - with search, type filter (tick one or several: Gamerip, Soundtrack, Arrangement …; "No type" for albums without one), "Ticked / With synced files / With problems" filters, and sorting by name, year, size or how much is synced (column heads, or the **Sort** menu: name, newest / oldest release - by year, then most recently added to khinsider -, largest, most synced). |
 | Selection | Tick an album, or tick a platform for **every album of it, including ones added later** (optionally only some album types, e.g. gamerips). Untick single albums of a ticked platform as exceptions. Ticks are saved immediately. |
 | Album details | Click an album: its tracks per disc with every format and size, its images, what is synced, where it is saved. The album's page is read the first time you open it. |
 | Formats | **Your own list, in your order**: tick the formats you want (and the album images) and move them up or down; an album gets either only the first ticked format it has, or every ticked one (e.g. FLAC *and* MP3). Files download in that order - every FLAC file of the sync before the first MP3. Quick picks: MP3 (default), FLAC else MP3, FLAC and MP3, best quality (FLAC → WAV → … → M4A → OPUS → OGG → MP3), everything. Any album can have **its own formats** (e.g. FLAC for favourites). Album images (covers, scans) are saved too unless you turn that off, optionally in an `Art` folder. |
@@ -135,7 +135,7 @@ Catalog and settings live in `config\` next to `start.bat`; the log is `config\k
 - **Scan site** reads `/console-list` (platform names) and every browse page,
   `/game-soundtracks/browse/<0-9|A…Z>?page=N` (500 albums a page), 4 pages at a time with pacing
   (halving parallelism and doubling the delay on 429/503/timeouts or slow answers). It respects
-  `robots.txt`.
+  `robots.txt`. Without "Look like Chrome" requests go out as HTTP/1.1, like a browser's plain request.
 - Each row gives the album's address (its slug), name, platforms, type and year. New albums get a
   folder name once (see [Folders](#folders)).
 - After a scan that read every page, albums you downloaded that the lists no longer show are looked
@@ -182,6 +182,12 @@ Sizes in the storage strip only count albums whose pages were read; it says how 
 | `best` | the first of FLAC, WAV, APE, WV, M4A, OPUS, OGG, AAC, MP3 the album has (khi-explorer's order) |
 | `all` | every format the album offers |
 | `.mp3, .ogg` | exactly these, where offered |
+
+With `first:` and the presets `mp3`, `flac`, `best`, a **track** the album has without its chosen
+format (an album in FLAC with a few tracks only as MP3) comes in the next format that applies: the
+next one of a `first:` list (none after it: left out), for `flac` MP3 and then the `best` order, for
+`best` the `best` order, for `mp3` the smallest other format. Such a file counts as part of the album
+(complete, not a Clean up leftover, in the playlist) and is kept by upgrades and Replace old formats.
 
 The two list forms are what the Settings editor saves (**Formats and download order**: tick, move
 up/down, "Only the first ticked format an album has" or "Every ticked format"); the presets below

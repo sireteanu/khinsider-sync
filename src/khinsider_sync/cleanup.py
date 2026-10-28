@@ -24,7 +24,6 @@ from typing import Optional
 
 from .core.sync import MANIFEST_NAME, Manifest
 from .core.util import fmt_bytes, fs_path
-from .catalog import album_wants
 
 log = logging.getLogger("khinsider_sync")
 
@@ -105,7 +104,7 @@ def find(engine, settings: dict, disk: list) -> list:
     replacing = bool(settings.get("replace_formats"))
 
     def wanted(hit) -> bool:
-        _url, album, ext, kind = hit
+        url, album, ext, kind = hit
         if kind != "art" and ext in upgrading.get(album, ()):
             return True                                    # kept until its replacement is in
         if replacing and kind != "art" and album in selected:
@@ -114,8 +113,8 @@ def find(engine, settings: dict, disk: list) -> list:
             return False
         if album not in want_cache:
             a = albums.get(album)
-            want_cache[album] = album_wants(settings, album, a["formats"] if a else [])
-        return ("art" if kind == "art" else ext) in want_cache[album]
+            want_cache[album] = catalog.wants(settings, album, a["formats"] if a else [])
+        return want_cache[album].has(url, ext, kind)
 
     def judged_gone(d: str) -> bool:
         """Can we tell this file isn't on the site? Its album was read without errors - or no

@@ -18,7 +18,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
-from .catalog import ALBUM, PLATFORM, album_wants, split_platforms
+from .catalog import ALBUM, PLATFORM, split_platforms
 from .parse import letter_of
 from .engine import Engine
 
@@ -202,7 +202,16 @@ def create_app(engine_factory, password: Optional[str] = None, on_restart=None, 
                   "synced": lambda a: (t(a)["synced_bytes"] / (t(a)["bytes"] or 1) if t(a)["files"] else -1,
                                        a["name"].casefold()),
                   }[sort]
-        items.sort(key=key_fn, reverse=dir < 0)
+        if sort == "year":
+            # newest (or oldest) release first; within a year the latest added to khinsider first,
+            # then by name - and albums without a year at the end either way
+            items.sort(key=lambda a: (a["name"].casefold(), a["slug"]))
+            items.sort(key=lambda a: a["added"] or "", reverse=True)
+            items.sort(key=lambda a: a["year"] or "", reverse=dir < 0)
+            if dir > 0:
+                items.sort(key=lambda a: not a["year"])
+        else:
+            items.sort(key=key_fn, reverse=dir < 0)
         views[key] = items
         while len(views) > 8:
             views.popitem(last=False)
@@ -264,11 +273,12 @@ def create_app(engine_factory, password: Optional[str] = None, on_restart=None, 
                 "FROM files WHERE album=? ORDER BY pos, ext", (slug,)).fetchall()
         keys = ("url", "ext", "kind", "disc", "num", "name", "title", "duration", "rel", "size", "local",
                 "local_size", "error")
-        want = album_wants(s, slug, a["formats"])
+        want = e.catalog.wants(s, slug, a["formats"])
         files = []
         for r in rows:
             f = dict(zip(keys, r))
-            f["wanted"] = ("art" if f["kind"] == "art" else f["ext"]) in want
+            f["wanted"] = want.has(f["url"], f["ext"], f["kind"])
+            f["stand_in"] = f["url"] in want.stand_ins
             files.append(f)
         places = s.get("album_places") or {}
         return {"album": album_json(e, a, rules, selected, s, e.catalog.platform_names()),

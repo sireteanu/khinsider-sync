@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import collections
-import importlib.util
 import logging
 import os
 import time
@@ -464,14 +463,15 @@ class Engine:
         log.info("Stopping...")
 
     def _client(self) -> httpx.AsyncClient:
-        http2 = importlib.util.find_spec("h2") is not None
         n = self.scan_workers + int(self.catalog.settings().get("parallel_max") or 8) * 2 + 4
         transport = browser.make_transport(bool(self.catalog.settings().get("impersonate", True)), n)
         if transport is not None:
             # Chrome's own User-Agent and headers go out (curl_cffi); only the Referer is ours
             return httpx.AsyncClient(transport=transport, follow_redirects=True, max_redirects=8,
                                      timeout=httpx.Timeout(20.0, connect=10.0), headers={"Referer": self.base})
-        return httpx.AsyncClient(http2=http2, follow_redirects=True, max_redirects=8,
+        # HTTP/1.1 like a plain browser request: Cloudflare singles out HTTP/2 from clients that aren't
+        # browsers (seen by the ghost-dl downloader)
+        return httpx.AsyncClient(http2=False, follow_redirects=True, max_redirects=8,
                                  timeout=httpx.Timeout(20.0, connect=10.0),
                                  limits=httpx.Limits(max_connections=n, max_keepalive_connections=n),
                                  headers=browser_headers(self.base))
@@ -705,10 +705,16 @@ class Engine:
         # FLAC file of the sync is queued before the first MP3 file, album by album within that
         plan = {a: album_plan(s, a, d["formats"]) for a, d in albums.items()}
         rank = {a: {k: album_rank(s, a, k) for k in p} for a, p in plan.items()}
-        rows = [r for r in self.catalog.files_of(albums)
-                if ("art" if r[4] == "art" else r[3]) in rank.get(r[2], {})]
+        wants = {a: self.catalog.wants(s, a, d["formats"]) for a, d in albums.items()}
+        # a track missing in the album's format comes in another one (format_fallback), queued with it
+        main = {a: next((k for k in p if k != "art"), None) for a, p in plan.items()}
+
+        def rank_of(r):
+            key = "art" if r[4] == "art" else r[3]
+            return rank[r[2]][key] if key in rank[r[2]] else rank[r[2]].get(main[r[2]], 0)
+        rows = [r for r in self.catalog.files_of(albums) if r[2] in wants and wants[r[2]].has(r[0], r[3], r[4])]
         order = {r[0]: i for i, r in enumerate(rows)}
-        rows.sort(key=lambda r: (rank[r[2]]["art" if r[4] == "art" else r[3]], order[r[0]]))
+        rows.sort(key=lambda r: (rank_of(r), order[r[0]]))
         unread = [a for a in slugs if a in albums and not albums[a]["read"]]
         if unread:
             log.warning("%d ticked albums couldn't be read and are left out of this sync", len(unread))
@@ -1066,7 +1072,8 @@ class Engine:
             raise ValueError(f"{fmt[1:].upper()} isn't a better format this album has")
         art = "art" in album_wants(s, slug, a["formats"])
         before = ups.get(slug, {}).get("formats", own.get(slug, ""))
-        own[slug] = f"first:{fmt}" + (",art" if art else "")
+        # the old formats after it: tracks the album doesn't have in the new one keep theirs
+        own[slug] = f"first:{fmt}" + "".join(f",{e}" for e in info["have"] if e != fmt) + (",art" if art else "")
         ups[slug] = {"to": fmt, "from": [e for e in info["have"] if e != fmt], "formats": before,
                      "since": time.time()}
         self.catalog.save_settings({"album_upgrades": ups, "album_formats": own})
@@ -1093,7 +1100,7 @@ class Engine:
             a = albums.get(slug)
             if a is None:
                 continue
-            want = album_wants(s, slug, a["formats"])
+            want = self.catalog.wants(s, slug, a["formats"])
             old = (stale.get(slug, set()) | set((ups.get(slug) or {}).get("from") or ())) - want
             if not (old or slug in ups):
                 continue
@@ -1117,9 +1124,11 @@ class Engine:
         todo = self._replacements(s)
         names = self.catalog.albums_by_slug(todo)
         for slug, (old, why, up) in sorted(todo.items()):
+            a = self.catalog.album(slug)
+            keep = self.catalog.wants(s, slug, a["formats"]).stand_ins if a else frozenset()
             files = [{"path": rel, "url": url, "size": size or 0, "reason": "replaced"}
                      for url, rel, _al, ext, kind, size, _n in self.catalog.saved_files(slug)
-                     if kind != "art" and ext in old]
+                     if kind != "art" and ext in old and url not in keep]   # stand-ins stay
             res = await asyncio.to_thread(cleanup.delete, self.data_dir, files)
             gone = set(res["deleted"])
             for f in files:

@@ -23,7 +23,7 @@ import logging
 import os
 import shutil
 
-from .catalog import AUDIO_EXTENSIONS, SYNCED_WORDS, album_plan
+from .catalog import AUDIO_EXTENSIONS, SYNCED_WORDS, album_plan, format_fallback, formats_for
 from .core.util import fs_path
 
 log = logging.getLogger("khinsider_sync")
@@ -85,7 +85,7 @@ def plan(engine, s: dict, slugs) -> dict:
     words = ",".join("'%s'" % w for w in SYNCED_WORDS)
     with engine.catalog.lock:
         rows = engine.catalog.db.execute(
-            f"SELECT album, ext, kind, rel, title, name, duration, local_size FROM files "
+            f"SELECT album, ext, kind, rel, title, name, duration, local_size, pos FROM files "
             f"WHERE local IN ({words}) ORDER BY album, pos, ext").fetchall()
         covers = {a: (url, ext, rel, local) for a, url, ext, rel, local in engine.catalog.db.execute(
             "SELECT album, url, ext, rel, local FROM files WHERE kind='art' ORDER BY album, pos DESC")
@@ -102,10 +102,17 @@ def plan(engine, s: dict, slugs) -> dict:
         if s.get("playlists"):
             order = [k for k in album_plan(s, slug, a["formats"]) if k in AUDIO_EXTENSIONS]
             fmt = next((k for k in order if any(f[1] == k and f[2] != "art" for f in files)), None)
-            tracks = [f for f in files if f[2] != "art" and f[1] == fmt]
-            if tracks:
+            # one line per track: in the album's format, or the one standing in for it (format_fallback)
+            _pick, rest = format_fallback(formats_for(s, slug), a["formats"])
+            prefer = ([fmt] if fmt else []) + [e for e in rest if e != fmt]
+            per_track: dict = {}
+            for f in files:
+                if f[2] != "art" and f[1] in prefer:
+                    per_track.setdefault(f[8] // 100, {})[f[1]] = f
+            tracks = [next(have[e] for e in prefer if e in have) for _p, have in sorted(per_track.items())]
+            if tracks and fmt:
                 lines = ["#EXTM3U", f"#PLAYLIST:{a['name']}"]
-                for _al, _ext, _kind, rel, title, name, dur, _n in tracks:
+                for _al, _ext, _kind, rel, title, name, dur, _n, _pos in tracks:
                     path = rel[len(folder) + 1:] if rel.startswith(folder + "/") else os.path.basename(rel)
                     lines.append(f"#EXTINF:{seconds(dur)},{title or name}")
                     lines.append(path)

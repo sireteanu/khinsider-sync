@@ -194,7 +194,7 @@ def test_upgrading_an_album_replaces_its_old_format(site, app_factory):
     r = c.post("/api/album/upgrade", json={"slug": SMW, "format": "flac"})
     assert r.status_code == 200 and r.json()["pending"]["from"] == [".mp3"]
     d = album(c, SMW)
-    assert d["upgrade"]["pending"]["to"] == ".flac" and d["formats"] == "first:.flac,art"
+    assert d["upgrade"]["pending"]["to"] == ".flac" and d["formats"] == "first:.flac,.mp3,art"
     assert not d["album"]["downloaded"]
     # meanwhile the MP3s are not offered to Clean up: the sync replaces them
     assert c.get("/api/cleanup").json()["files"] == []

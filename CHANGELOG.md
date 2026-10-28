@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.0.21] - 2026-10-28
+
+### New
+- **Sort** menu next to the album filters: **Newest release** first (by year; within a year the
+  most recently added to khinsider first), oldest release, name, largest, most synced.
+
+### Fixed
+- A track an album doesn't have in its chosen format - most tracks in FLAC, a few only as MP3 - was
+  left out. It now comes in the next format the setting allows (with FLAC: MP3), counts as part of the
+  album, appears in its playlist, and is kept by upgrades and Replace old formats. An upgrade to FLAC
+  keeps the MP3 of such a track.
+
+### Changed
+- With "Look like Chrome" off, requests go out as HTTP/1.1 (Cloudflare singles out HTTP/2 from
+  clients that aren't browsers).
+
 ## [1.0.20] - 2026-10-27
 
 ### New

@@ -405,6 +405,8 @@ function showHead() {
     b.classList.toggle("desc", on && view.dir === -1);
     b.setAttribute("aria-sort", on ? (view.dir === 1 ? "ascending" : "descending") : "none");
   }
+  const pick = `${view.sort}:${view.dir}`;
+  $("#f-sort").value = [...$("#f-sort").options].some((o) => o.value === pick) ? pick : "custom";
 }
 for (const b of document.querySelectorAll(".acols .sort")) {
   b.addEventListener("click", () => {
@@ -443,6 +445,13 @@ $("#search").addEventListener("input", () => {
   }, 250);
 });
 $("#f-show").addEventListener("change", (e) => { view.show = e.target.value; saveView(); reload(); });
+$("#f-sort").addEventListener("change", (e) => {
+  const [sort, dir] = e.target.value.split(":");
+  if (!dir) return;
+  view = { ...view, sort, dir: Number(dir) };
+  saveView();
+  reload();
+});
 
 /* ---------------------------------------------------------------- album dialog */
 let current = null;                // slug in the dialog

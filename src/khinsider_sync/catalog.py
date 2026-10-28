@@ -158,6 +158,49 @@ def format_plan(setting, album_formats: Iterable[str], art: bool) -> list:
     return out
 
 
+def format_fallback(setting, album_formats: Iterable[str]) -> tuple:
+    """(the album's format, [formats to use instead, in order]) for settings that save one format of
+    an album: a track the album has in other formats only - FLAC for most tracks, a few as MP3 - gets
+    the first of these it has, so it isn't left out. (None, []) when every format is saved anyway."""
+    have = [f for f in album_formats if f]
+    mode, items, preset = parse_format_setting(setting or "mp3")
+    if (items is not None and ":" not in str(setting)) or preset == "all" or mode == "all":
+        return None, []
+    plan = [k for k in format_plan(setting, have, False) if k != "art"]
+    if not plan:
+        return None, []
+    pick = plan[0]
+    if preset == "mp3":
+        order = [".mp3"] + list(reversed(BEST_ORDER))   # the smaller formats first
+    elif preset == "flac":
+        order = [".flac", ".mp3"] + list(BEST_ORDER)
+    elif preset:
+        order = list(BEST_ORDER)
+    else:                                              # first:<list> - only what the list names
+        audio = [i for i in items if i != "art"]
+        order = audio[audio.index(pick) + 1:] if pick in audio else []
+    rest = []
+    for f in order:
+        if f in have and f != pick and f not in rest:
+            rest.append(f)
+    return pick, rest
+
+
+class Want(frozenset):
+    """What a sync saves of one album: its formats (and "art" for the images), plus `stand_ins` -
+    the files of tracks the album's format is missing for (format_fallback). `"art" in want` and
+    `ext in want` work as for a set; whether one file is wanted: want.has(url, ext, kind)."""
+
+    def __new__(cls, keys=(), stand_ins=()):
+        self = super().__new__(cls, keys)
+        self.rows = dict(stand_ins) if isinstance(stand_ins, dict) else {u: None for u in stand_ins}
+        self.stand_ins = frozenset(self.rows)
+        return self
+
+    def has(self, url: str, ext: str, kind: str) -> bool:
+        return ("art" if kind == "art" else ext) in self or url in self.stand_ins
+
+
 def format_rank(setting, key: str) -> int:
     """Where a format (or "art") stands in a formats setting's order: the download order across
     albums. Presets follow BEST_ORDER, their images come last."""
@@ -244,6 +287,8 @@ class Catalog:
         self.db.commit()
         self._index: Optional[list] = None       # [(slug, (platforms), type)] for the selection
         self._stats: Optional[dict] = None       # {album: {ext|"art": [n, bytes, synced, synced_bytes, failed]}}
+        self._pages: dict = {}                   # {album: tracks} (with stats)
+        self._stand: dict = {}                   # stand_ins() cache (with stats)
         self.version = 0                          # +1 on every change the page should show
 
     def changed(self, albums: bool = False) -> None:
@@ -821,18 +866,57 @@ class Catalog:
                         cur[i] += v
                     cur[5] = max(cur[5], last or 0.0)
             self._stats = out
+            with self.lock:
+                self._pages = dict(self.db.execute(
+                    "SELECT album, COUNT(DISTINCT page) FROM files WHERE kind='track' GROUP BY album"))
+            self._stand = {}
         return self._stats
+
+    def stand_ins(self, slug: str, pick: Optional[str], fallback: list) -> dict:
+        """{url: [1, bytes, synced, synced_bytes, failed, last synced]} of the files that stand in for
+        an album's tracks missing in its format `pick` (format_fallback), cached with stats()."""
+        st = self.stats().get(slug, {})
+        if not pick or not fallback or st.get(pick, [0])[0] >= self._pages.get(slug, 0):
+            return {}                            # every track has the album's format
+        key = (slug, pick, tuple(fallback))
+        if key in self._stand:
+            return self._stand[key]
+        words = SYNCED_WORDS
+        with self.lock:
+            rows = self.db.execute("SELECT page, ext, url, bytes, local, local_size, error, synced FROM files "
+                                   "WHERE album=? AND kind='track'", (slug,)).fetchall()
+        by_page: dict = {}
+        for page, ext, *rest in rows:
+            by_page.setdefault(page, {})[ext] = rest
+        out = {}
+        for page, have in by_page.items():
+            if pick in have:
+                continue
+            ext = next((f for f in fallback if f in have), None)
+            if ext is None:
+                continue
+            url, b, local, lsize, err, synced = have[ext]
+            ok = local in words
+            out[url] = [1, (lsize or b or 0) if ok else (b or 0), int(ok), (lsize or b or 0) if ok else 0,
+                        int(err is not None and local is None), (synced or 0.0) if ok else 0.0]
+        self._stand[key] = out
+        return out
+
+    def wants(self, settings: dict, slug: str, album_formats) -> Want:
+        """album_wants() plus the files standing in for tracks missing in the album's format."""
+        keys = album_wants(settings, slug, album_formats)
+        pick, rest = format_fallback(formats_for(settings, slug), album_formats)
+        return Want(keys, self.stand_ins(slug, pick, rest))
 
     def album_totals(self, slug: str, formats: list, settings: dict) -> dict:
         """Files, size and how much is synced of what a sync of this album saves. `downloaded`:
         every one of them is in the download folder (`downloaded_at`: when the last one arrived) -
         khinsider doesn't change albums, so a downloaded album is never checked again."""
-        want = album_wants(settings, slug, formats)
+        want = self.wants(settings, slug, formats)
         st = self.stats().get(slug, {})
         t = [0, 0, 0, 0, 0]
         last = 0.0
-        for key in want:
-            row = st.get(key, (0, 0, 0, 0, 0, 0.0))
+        for row in [st.get(key, (0, 0, 0, 0, 0, 0.0)) for key in want] + [r for r in want.rows.values() if r]:
             for i in range(5):
                 t[i] += row[i]
             last = max(last, row[5])

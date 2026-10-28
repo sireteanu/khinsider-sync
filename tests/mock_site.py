@@ -337,12 +337,18 @@ class MockSite:
     def token(slug: str) -> str:
         return hashlib.md5(slug.encode()).hexdigest()[:10]
 
+    @staticmethod
+    def track_formats(a: dict, stem: str) -> list:
+        """The formats one track is offered in: the album's, less any listed in a["lacks"][stem]
+        (khinsider: an album in FLAC with a few tracks as MP3 only - their FLAC cell is empty)."""
+        return [f for f in a["formats"] if f not in (a.get("lacks") or {}).get(stem, ())]
+
     def has_file(self, slug: str, name: str) -> bool:
         a = self.albums.get(slug)
         if not a:
             return False
         stem, _, ext = name.rpartition(".")
-        return any(t[2] == stem for t in a["tracks"]) and ext.upper() in a["formats"]
+        return any(t[2] == stem for t in a["tracks"]) and ext.upper() in self.track_formats(a, stem)
 
     @staticmethod
     def ctype(name: str) -> str:
@@ -521,7 +527,8 @@ class MockSite:
                 rows += f'\t\t\t<td align="right" style="padding-right: 8px;">{num}.</td>\n'
             rows += f'\t \t<td class="clickable-row"><a href="{href}">{html.escape(title)}</a></td>\n'
             rows += cell(dur)
-            rows += "".join(cell(mb(len(self.content(slug, f"{stem}.{f.lower()}")))) for f in a["formats"])
+            rows += "".join(cell(mb(len(self.content(slug, f"{stem}.{f.lower()}")))
+                                 if f in self.track_formats(a, stem) else "") for f in a["formats"])
             rows += (f'                <td class="playlistDownloadSong"><a href="{href}"><i class="material-icons">'
                      f'get_app</i></a></td>\n        <td class="playlistAddCell"><div class="playlistAddTo" songid="1">'
                      f'<i class="material-icons">playlist_add</i></div></td>\n\t</tr>\n')
@@ -548,7 +555,7 @@ class MockSite:
         links = "".join(
             f'<p><a href="{self.url}/soundtracks/{slug}/{self.token(slug)}/{up.quote(stem + "." + f.lower())}">'
             f'<span class="songDownloadLink"><i class="material-icons">get_app</i>Click here to download as {f}'
-            f'</span></a> ({mb(len(self.content(slug, stem + "." + f.lower())))})</p>\n' for f in a["formats"])
+            f'</span></a> ({mb(len(self.content(slug, stem + "." + f.lower())))})</p>\n' for f in self.track_formats(a, stem))
         first = f'{self.url}/soundtracks/{slug}/{self.token(slug)}/{up.quote(stem + "." + a["formats"][0].lower())}'
         content = (f'<h2>{html.escape(a["name"])}</h2> <br><br>\n<p align="left">Go back to the album - <b><a href='
                    f'"/game-soundtracks/album/{slug}">{html.escape(a["name"])}</a></b></p>\n<p align="left"> Album '

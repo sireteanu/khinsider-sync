@@ -37,13 +37,16 @@ done. Albums whose page hasn't been read yet don't have a size; the next sync re
 
 Albums you already have show a **Downloaded** tag in the list (or **Partly downloaded** while a sync
 is still getting them). Pick **Downloaded** or **Not downloaded** in the filter next to the search box
-to see just those.
+to see just those. **Sort** next to it puts the **newest releases** first (by year; within a year
+the most recently added to khinsider first), or the oldest, the largest, or by name.
 
 ## 4. Choose formats and folders (Settings, in the ☰ menu)
 
 - **Formats and download order**: tick the formats you want - and *Images* for covers and scans -
   and move them up or down. Choose whether an album gets **only the first ticked format it has**
-  (e.g. FLAC, else MP3) or **every ticked format** (e.g. FLAC and MP3). Files download in that
+  (e.g. FLAC, else MP3) or **every ticked format** (e.g. FLAC and MP3). With "only the first",
+  a track the album lacks in that format (most tracks in FLAC, a few only as MP3) comes in the next
+  ticked format it has, so no track is left out. Files download in that
   order: all the FLAC files first, then the MP3s. The buttons above the list fill it in for you.
   FLAC is often 3 to 5 times bigger.
 - **Track names**: as khinsider names them, or `01 - Title.mp3` / `1-01 - Title.flac` from the
@@ -115,7 +118,8 @@ panel shows how far it has got and how long it will take.
 
 **Better quality later**: if you downloaded an album as MP3 and khinsider also has it as FLAC, its
 window offers **Upgrade to FLAC**. The next sync downloads the FLAC files and, once they are all
-there, deletes the album's MP3s (the images stay). Until then you keep the MP3s.
+there, deletes the album's MP3s (the images stay). Until then you keep the MP3s. A track the
+album doesn't have as FLAC keeps its MP3.
 **Cancel upgrade** undoes it.
 
 To move your whole collection to another format, change **Formats** in Settings and tick

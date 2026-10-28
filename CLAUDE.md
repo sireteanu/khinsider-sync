@@ -90,7 +90,9 @@ tests/  conftest (app_factory + API helpers), mock_site, fixtures/ (real markup 
    (`folder_layout`: album | platform | type | year) + folder. `Engine.rel_for()` names each file:
    khinsider's name, or `track_name()` ("1-01 - Title.flac") with `track_names: numbered`; images
    go in `Art/` with `art_folder`. Per-album formats: `album_formats` via `catalog.album_wants()` -
-   use it wherever a sync decides what to save (engine, cleanup, web). Formats settings
+   use it wherever a sync decides what to save (engine, cleanup, web) - per file through
+   `Catalog.wants()` (a `Want`: the formats plus `stand_ins`, files of tracks missing in the album's
+   format, `format_fallback`); `want.has(url, ext, kind)`. Formats settings
    (`catalog.parse_format_setting`): presets `mp3|flac|best|all` (images per `album_art`), or ordered
    lists `first:`/`all:` with `art` for images; `format_plan()` gives an album's files in order,
    `format_rank()` the download order across albums (the sync sorts its queue by it).
