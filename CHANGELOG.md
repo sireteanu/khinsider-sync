@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.19] - 2026-10-27
+
+### Fixed
+- Changing **Page reads a minute** only took effect at the next sync, so a running sync kept its
+  old pace (with 10, one file every 6 seconds) - now that the whole list goes in one sync, that
+  could be days. The new pace now applies at once.
+
 ## [1.0.18] - 2026-10-27
 
 ### Improved

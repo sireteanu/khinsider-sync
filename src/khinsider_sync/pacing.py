@@ -23,6 +23,16 @@ class PageRate:
         self._next = 0.0
         self._lock = None
 
+    def set(self, per_minute: float) -> None:
+        """A new rate for a job under way (Settings changed): the next requests use it - no waiting
+        on slots booked at the old, slower pace beyond one new interval."""
+        self.interval = 60.0 / per_minute if per_minute and per_minute > 0 else 0.0
+        try:
+            now = asyncio.get_running_loop().time()
+        except RuntimeError:
+            return
+        self._next = min(self._next, now + self.interval)
+
     async def wait(self) -> None:
         if not self.interval:
             return

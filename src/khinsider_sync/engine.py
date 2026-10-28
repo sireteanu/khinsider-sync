@@ -411,6 +411,10 @@ class Engine:
                 clean["album_art"] = "art" in items
         moving = [k for k in ("folder_layout", "track_names", "art_folder") if k in clean and clean[k] != s.get(k)]
         self.catalog.save_settings(clean)
+        if "pages_per_minute" in clean and clean["pages_per_minute"] != s.get("pages_per_minute"):
+            self.page_rate.set(float(clean["pages_per_minute"] or 0))   # a sync under way speeds up / slows down now
+            if self.busy:
+                log.info("Page reads a minute: %s from now on", clean["pages_per_minute"] or "no limit")
         if moving:
             log.info("Changed %s", ", ".join(f"{k.replace('_', ' ')} to {clean[k]}" for k in moving))
             self._remap()

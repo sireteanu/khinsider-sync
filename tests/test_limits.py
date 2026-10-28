@@ -123,3 +123,24 @@ def test_one_album_at_a_time(site, app_factory):
              if p.startswith("/game-soundtracks/album/")]
     assert kinds.count("page") == 3
     assert all(not (a == b == "page") for a, b in zip(kinds, kinds[1:])), kinds
+
+
+def test_a_new_page_rate_applies_at_once():
+    async def run():
+        rate = PageRate(6)                        # one every 10 s
+        await rate.wait()
+        rate.set(600)                             # Settings changed while a sync runs
+        t0 = time.monotonic()
+        for _ in range(3):
+            await rate.wait()
+        return time.monotonic() - t0
+    assert asyncio.run(run()) < 1
+
+
+def test_settings_change_the_running_page_rate(site, app_factory):
+    c = app_factory(site)
+    eng = c.app.state.engine
+    c.post("/api/settings", json={"pages_per_minute": 30})
+    assert eng.page_rate.interval == 2.0
+    c.post("/api/settings", json={"pages_per_minute": 0})
+    assert eng.page_rate.interval == 0

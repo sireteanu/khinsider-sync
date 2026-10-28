@@ -72,7 +72,8 @@ reads pages too fast - then nothing can be read for a while. In Settings → **G
 
 - **Page reads a minute** (60 by default): every downloaded track needs its track page, so this sets
   the pace of a big sync - it's the most files a minute the app can download. At 10, that's 10
-  files a minute (about 0.5-1 MB/s for MP3s) however fast your connection is.
+  files a minute (about 0.5-1 MB/s for MP3s) however fast your connection is. A change applies
+  at once, also to a sync under way.
 - **Files an hour** and **Albums a day**: spread a long list over hours or days.
 - **Albums at a time** (1 by default): how many new album pages a sync reads before downloading
   those albums. With 1, it reads one album's page, downloads that album, then reads the next - it
