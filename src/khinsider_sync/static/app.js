@@ -1034,6 +1034,7 @@ $("#btn-settings").addEventListener("click", async () => {
   $("#notify-result").textContent = "";
   form.track_names.value = s.track_names || "site";
   form.impersonate.checked = s.impersonate !== false;
+  form.player_links.checked = s.player_links !== false;
   const box = $("#types-list");
   box.innerHTML = "";
   const kinds = plats.types.map(([t]) => t).filter((t) => t !== "Other");
@@ -1125,6 +1126,7 @@ $("#settings-save").addEventListener("click", async (e) => {
     notify_on: ["downloads", "new_albums", "problems"].filter((e) => form["notify_" + e].checked),
     track_names: form.track_names.value,
     impersonate: form.impersonate.checked,
+    player_links: form.player_links.checked,
     platform_types: [...document.querySelectorAll("#types-list input:checked")].map((i) => i.value),
     parallel: auto ? "auto" : form.parallel_n.value,
     max_rate: form.max_rate.value.trim(),

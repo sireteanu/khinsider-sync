@@ -14,6 +14,9 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from khinsider_sync.engine import Engine  # noqa: E402
 from khinsider_sync.web import create_app  # noqa: E402
+from khinsider_sync import parse as _parse  # noqa: E402
+
+_parse.FILE_ORIGINS.append(("http", "127.0.0.1"))   # MockSite's file server
 
 FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures")
 # fast DownloadGate timings for tests (seconds)

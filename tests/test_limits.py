@@ -93,6 +93,7 @@ def test_pages_a_minute_slows_page_reads(site, app_factory):
 
 def test_a_long_list_is_done_in_batches(site_factory, app_factory):
     site = site_factory()
+    site.player = False                           # downloads read track pages in between
     c = app_factory(site, settings={"album_art": False, "albums_per_batch": 2})
     scan(c)
     select(c, "p:windows")                        # 3 albums, none read yet
@@ -112,6 +113,7 @@ def test_a_long_list_is_done_in_batches(site_factory, app_factory):
 
 
 def test_one_album_at_a_time(site, app_factory):
+    site.player = False
     c = app_factory(site, settings={"album_art": False, "albums_per_batch": 1})
     scan(c)
     select(c, "p:windows")

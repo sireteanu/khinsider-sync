@@ -9,7 +9,7 @@ import os
 import time
 from collections import deque
 from typing import Optional
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 from urllib.robotparser import RobotFileParser
 
 import httpx
@@ -118,10 +118,16 @@ class Resolver:
     the track page right before the download (the page holds every format's link, so it is read
     once per track and kept for its other formats)."""
 
-    def __init__(self, client: httpx.AsyncClient, pages: dict, keep: int = 4000, page_rate=None):
+    def __init__(self, client: httpx.AsyncClient, pages: dict, keep: int = 4000, page_rate=None,
+                 direct: Optional[dict] = None):
         self.client = client
         self.page_rate = page_rate
         self.pages = pages                     # catalog address -> track page (None: download as is)
+        # catalog address -> MP3 address from the album page's player: no track page needed; if it
+        # doesn't deliver the file (source_failed), the track page is read after all
+        self.direct = dict(direct or {})
+        self.direct_used = 0
+        self.direct_failed = 0
         self.cache: "collections.OrderedDict[str, dict]" = collections.OrderedDict()
         self.locks: dict = {}
         self.keep = keep
@@ -129,6 +135,9 @@ class Resolver:
         self.challenged = False                # a track page got Cloudflare's browser check
 
     async def __call__(self, url: str) -> str:
+        if url in self.direct:
+            self.direct_used += 1
+            return self.direct[url]
         page = self.pages.get(url)
         if not page:
             return url
@@ -137,6 +146,16 @@ class Resolver:
         if ext not in links:
             raise ResolveError(f"the track page has no {ext[1:].upper()} link", permanent=True)
         return links[ext]
+
+    def source_failed(self, url: str, src: str) -> bool:
+        """The downloader got no file from the player's address: use the track page from now on."""
+        if self.direct.get(url) != src:
+            return False
+        del self.direct[url]
+        self.direct_failed += 1
+        log.info("The album page's address for %s didn't work - reading its track page instead",
+                 unquote(src.rsplit("/", 1)[-1]))
+        return True
 
     async def _links(self, page: str) -> dict:
         if page in self.cache:
@@ -371,7 +390,7 @@ class Engine:
             if k == "outage_wait_hours":
                 v = max(0.0, float(v or 0))
                 v = int(v) if v == int(v) else v
-            if k in ("resume_interrupted", "album_art", "art_folder", "impersonate", "replace_formats",
+            if k in ("resume_interrupted", "album_art", "art_folder", "impersonate", "replace_formats", "player_links",
                      "playlists", "folder_art", "embed_cover", "write_tags"):
                 v = bool(v)
             if k == "notify_url":
@@ -771,7 +790,9 @@ class Engine:
             self.catalog.add_change(job_id, "failed", rel, None, err)
 
         allowed = (lambda u: robots.can_fetch(USER_AGENT, u)) if robots else None
-        resolver = Resolver(client, {r[0]: r[6] for r in rows if r[6]}, page_rate=self.page_rate)
+        direct = self.catalog.direct_links(albums) if s.get("player_links", True) else {}
+        resolver = Resolver(client, {r[0]: r[6] for r in rows if r[6]}, page_rate=self.page_rate,
+                            direct={r[0]: direct[r[0]] for r in rows if r[0] in direct})
         self.downloader = dl = Downloader(cfg, client, manifest, self.gate, root=data_dir,
                                           bucket=RateLimit(rate) if rate else None, allowed=allowed,
                                           on_done=on_done, on_failed=on_failed, resolve=resolver)
@@ -909,6 +930,11 @@ class Engine:
         summary["paused"] = dl.paused
         summary["server_max"] = best
         summary["track_pages"] = resolver.requests
+        summary["player_files"] = resolver.direct_used - resolver.direct_failed
+        if resolver.direct_used:
+            log.info("%d files came with the address from their album page's player (no track page needed)%s",
+                     resolver.direct_used - resolver.direct_failed,
+                     f"; {resolver.direct_failed} needed their track page after all" if resolver.direct_failed else "")
         # carry on by itself when a limit stopped this sync (not when you pressed Stop)
         resume = 0.0
         if not self.stop_requested:

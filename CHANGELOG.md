@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.0.22] - 2026-10-28
+
+### New
+- **MP3 files no longer need a track page each.** An album page's music player already lists every
+  track's MP3 address; the app now takes them from there (read from the page, nothing run), so an
+  MP3 album costs one page read however many tracks it has - up to dozens of times fewer requests to
+  the part of khinsider Cloudflare guards, and MP3 downloads go as fast as your connection. FLAC and
+  other formats still read their track pages. If an address from the player doesn't work, that file
+  falls back to its track page. Settings → Go easy on khinsider → **Take MP3 addresses from the album
+  page's music player** (on by default). Albums whose page was read before this version still use
+  track pages until their page is read again.
+
 ## [1.0.21] - 2026-10-28
 
 ### New

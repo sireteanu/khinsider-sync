@@ -46,6 +46,8 @@ from __future__ import annotations
 
 import hashlib
 import html
+import json
+import re
 import socket
 import threading
 import time
@@ -145,6 +147,25 @@ def page(title: str, content: str) -> str:
             f'{content}\n  \t\t</div>\n  \t</div>\n</div>\n</body></html>')
 
 
+def pack(code: str) -> str:
+    """Dean Edwards' packer, base 62, as khinsider's album pages use it: every word becomes its index
+    in a dictionary (most frequent first), written in the packer's own digits."""
+    import collections as _c
+
+    def enc(c: int) -> str:
+        return ("" if c < 62 else enc(c // 62)) + (chr(c % 62 + 29) if c % 62 > 35 else "0123456789abcdefghijklmnopqrstuvwxyz"[c % 62])
+    words = [w for w, _n in _c.Counter(re.findall(r"\b[0-9A-Za-z]+\b", code)).most_common()]
+    index = {w: enc(i) for i, w in enumerate(words)}
+    keys = ["" if index[w] == w else w for w in words]
+    payload = re.sub(r"\b[0-9A-Za-z]+\b", lambda m: index[m.group()], code)
+    payload = payload.replace("\\", "\\\\").replace("'", "\\'")
+    head = ("eval(function(p,a,c,k,e,d){e=function(c){return(c<a?'':e(parseInt(c/a)))+((c=c%a)>35?String."
+            "fromCharCode(c+29):c.toString(36))};if(!''.replace(/^/,String)){while(c--){d[e(c)]=k[c]||e(c)}k=["
+            "function(e){return d[e]}];e=function(){return'\\\\w+'};c=1};while(c--){if(k[c]){p=p.replace(new "
+            "RegExp('\\\\b'+e(c)+'\\\\b','g'),k[c])}}return p}")
+    return f"{head}('{payload}',62,{len(words)},'{'|'.join(keys)}'.split('|'),0,{{}}))\n"
+
+
 class MockSite:
     def __init__(self, modes: str = ""):
         self.modes = {m.strip() for m in modes.split(",") if m.strip()}
@@ -172,6 +193,8 @@ class MockSite:
         self.challenge = False             # pages answer Cloudflare's browser check (403, cf-mitigated)
         self.robots_extra = ""             # more robots.txt lines
         self.broken_images: set = set()    # image names that answer 404 (listed on the page, file gone)
+        self.player = True                 # album pages carry the music player's packed track list
+        self.player_broken: set = set()    # albums whose player addresses are wrong (403 from the files)
         self.requests: list = []           # (path, headers dict)
         self._lock = threading.Lock()
         self._count = 0
@@ -530,7 +553,7 @@ class MockSite:
             rows += "".join(cell(mb(len(self.content(slug, f"{stem}.{f.lower()}")))
                                  if f in self.track_formats(a, stem) else "") for f in a["formats"])
             rows += (f'                <td class="playlistDownloadSong"><a href="{href}"><i class="material-icons">'
-                     f'get_app</i></a></td>\n        <td class="playlistAddCell"><div class="playlistAddTo" songid="1">'
+                     f'get_app</i></a></td>\n        <td class="playlistAddCell"><div class="playlistAddTo" songid="{self.songid(slug, stem)}">'
                      f'<i class="material-icons">playlist_add</i></div></td>\n\t</tr>\n')
         span = 2 + a["cd"] + a["num"]
         foot = (f'\t<tr id="songlist_footer">\n\t<th colspan="{span}" align="right"><b>Total:</b></th>\n'
@@ -541,10 +564,30 @@ class MockSite:
                    f'<p></p>\n<div class="albumMassDownload"><a href="/cp/add_album/1">x</a><div> Download all songs at '
                    f'once: <a href="/cp/add_album/1">click to download</a></div>\n</div>\n<div id="nowPlay"></div>\n'
                    f'<div id="audiowrap"></div>\n<table id="songlist">\n<tbody><tr id="songlist_header">\n{th}</tr>\n'
-                   f'{rows}{foot}</tbody></table>\n<h2>Description</h2><p>Some text.</p>\n'
+                   f'{rows}{foot}</tbody></table>\n{self.player_script(slug)}<h2>Description</h2><p>Some text.</p>\n'
                    f'<h2>People who viewed this also viewed</h2><table><tbody><tr><td class="albumIconLarge">'
                    f'<a href="/game-soundtracks/album/sonic-the-hedgehog-genesis"><p>Sonic</p></a></td></tr></tbody></table>')
         return page(f"{a['name']} MP3 - Download Soundtracks for FREE!", content)
+
+    @staticmethod
+    def songid(slug: str, stem: str) -> str:
+        return str(1_000_000 + int(hashlib.sha1(f"{slug}/{stem}".encode()).hexdigest()[:8], 16) % 9_000_000)
+
+    def player_script(self, slug: str) -> str:
+        """The album page's music player like khinsider's (tests/fixtures/album_player_bead.html): a
+        `tracks` list with each MP3's address, packed with Dean Edwards' packer (base 62)."""
+        a = self.albums[slug]
+        if not self.player or "MP3" not in a["formats"]:
+            return ""
+        token = "wrongtoken" if slug in self.player_broken else self.token(slug)
+        host = self.url.split("://", 1)[1]
+        tracks = [{"track": int(num or 0), "name": title, "length": dur, "songid": self.songid(slug, stem),
+                   "file": f"{host}/soundtracks/{slug}/{token}/{up.quote(stem + '.mp3')}"}
+                  for _disc, num, stem, title, dur in a["tracks"] if "MP3" in self.track_formats(a, stem)]
+        code = ("function formatTime(seconds){return seconds}jQuery(function($){var supportsAudio=!!document."
+                "createElement('audio').canPlayType;if(supportsAudio){var index=1,playing=false,mediaPath='http://',"
+                "extension='',tracks=" + json.dumps(tracks)[:-1] + ",],trackCount=tracks.length,shuffleOn=false;}});")
+        return "<script type=\"text/javascript\">" + pack(code) + "</script>\n"
 
     def track_page(self, slug: str, track: str) -> str:
         a = self.albums.get(slug)

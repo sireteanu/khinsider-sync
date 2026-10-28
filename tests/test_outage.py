@@ -81,6 +81,7 @@ def test_a_cloudflare_browser_check_stops_a_scan_at_once(site, app_factory):
 
 
 def test_a_browser_check_pauses_a_sync_without_failing_files(site, app_factory):
+    site.player = False                           # downloads need track pages
     c = app_factory(site)
     scan(c)
     select(c, "p:windows")
@@ -158,6 +159,7 @@ def test_a_browser_check_waits_and_tries_again_by_itself(site, app_factory):
 
 
 def test_a_browser_check_on_track_pages_also_waits(site, app_factory):
+    site.player = False
     c = app_factory(site, settings={"album_art": False})
     scan(c)
     select(c, "p:windows")

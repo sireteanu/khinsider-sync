@@ -5,10 +5,15 @@
   /game-soundtracks/album/<slug>                one album: details, track list (#songlist), images
   /game-soundtracks/album/<slug>/<file>.mp3     one track: links to the file in each format
 
+An album page also holds its music player's track list - a packed script (Dean Edwards' packer)
+with every track's MP3 address: player_links() reads it without running it, so MP3 files need
+no track page.
+
 Nothing here makes requests; the scanner and the engine fetch the pages.
 """
 from __future__ import annotations
 
+import json
 import re
 import time
 from typing import Optional
@@ -286,8 +291,17 @@ def parse_album(body: bytes, page_url: str) -> dict:
             sizes = {ext: norm_size(found[k]) for k, (_, ext) in enumerate(fmt_cols) if k < len(found)}
             disc = num = ""
         duration = next((c for c in cells if _DURATION.match(c)), "")
+        sid = tr.css_first("[songid]")
         out["tracks"].append({"page": page, "file": track_file(page), "disc": disc, "num": num,
-                              "title": _text(link), "duration": duration, "sizes": sizes})
+                              "title": _text(link), "duration": duration, "sizes": sizes,
+                              "songid": (sid.attributes.get("songid") or "") if sid is not None else ""})
+    # the player's MP3 addresses, for the tracks they surely belong to (same song id and file name)
+    player = player_links(body if isinstance(body, str) else body.decode("utf-8", "replace"), out["slug"])
+    for t in out["tracks"]:
+        u = player.get(t["songid"]) if t["songid"] else None
+        stem = t["file"].rsplit(".", 1)[0]
+        if u and unquote(u.rsplit("/", 1)[-1]).rsplit(".", 1)[0] == stem:
+            t["mp3"] = u
 
     # the album's own images (covers, scans): full-size links, or the image itself when a gallery
     # has no link; never the "also viewed" albums, comments or avatars further down the page
@@ -329,3 +343,145 @@ def parse_track(body: bytes, page_url: str) -> dict:
         ext = extension(unquote(urlsplit(href).path))
         out.setdefault(ext, href)
     return out
+
+
+# ---------------------------------------------------------------------------- the album page's player
+_JS_STRING = r"(?:'(?:\\.|[^'\\])*'|\"(?:\\.|[^\"\\])*\")"
+_PACKED = re.compile(r"\}\s*\(\s*(" + _JS_STRING + r")\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(" + _JS_STRING
+                     + r")\s*\.split\(\s*['\"]\|['\"]\s*\)", re.S)
+_WORD = re.compile(r"\b[0-9A-Za-z]+\b", re.ASCII)
+_DIGITS = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+
+def _js_string(literal: str) -> str:
+    """The value of a JavaScript string literal (quotes included) - read, never run."""
+    body, out, i = literal[1:-1], [], 0
+    esc = {"b": "\b", "f": "\f", "n": "\n", "r": "\r", "t": "\t", "v": "\v", "0": "\0"}
+    while i < len(body):
+        ch = body[i]
+        i += 1
+        if ch != "\\":
+            out.append(ch)
+            continue
+        if i >= len(body):
+            raise ValueError("cut-off escape")
+        ch = body[i]
+        i += 1
+        if ch in "xu":
+            n = 2 if ch == "x" else 4
+            code = body[i:i + n]
+            if len(code) != n or not re.fullmatch(r"[0-9a-fA-F]+", code):
+                raise ValueError("bad escape")
+            out.append(chr(int(code, 16)))
+            i += n
+        else:
+            out.append(esc.get(ch, ch))
+    return "".join(out)
+
+
+def unpack(script: str) -> list:
+    """The code inside each packed `eval(function(p,a,c,k,e,d){...}('...',62,204,'...'.split('|')...))`
+    of a script: every word that is a number in the packer's base is replaced by its dictionary entry
+    - what the packer's own function does, without running anything."""
+    found = []
+    for m in list(_PACKED.finditer(script))[:8]:
+        try:
+            payload, radix, count, words = m.groups()
+            radix, count = int(radix), int(count)
+            if not 2 <= radix <= 62 or count > 100_000:
+                continue
+            payload, words = _js_string(payload), _js_string(words).split("|")
+
+            def word(w, radix=radix, count=count, words=words):
+                v = 0
+                if len(w.group()) > 8:
+                    return w.group()
+                for ch in w.group():
+                    d = _DIGITS.find(ch)
+                    if d < 0 or d >= radix:
+                        return w.group()
+                    v = v * radix + d
+                return words[v] if v < min(count, len(words)) and words[v] else w.group()
+            found.append(_WORD.sub(word, payload))
+        except (ValueError, IndexError):
+            continue
+    return found
+
+
+def _js_array(text: str):
+    """The JSON array at the start of `text` (JavaScript allows a comma before "]")."""
+    depth, quoted, escaped, out = 0, False, False, []
+    for i, ch in enumerate(text):
+        if quoted:
+            out.append(ch)
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                quoted = False
+            continue
+        if ch == '"':
+            quoted = True
+        elif ch in "[{":
+            depth += 1
+        elif ch in "]}":
+            depth -= 1
+        elif ch == "," and text[i + 1:].lstrip()[:1] in ("]", "}"):
+            continue
+        out.append(ch)
+        if depth == 0:
+            return json.loads("".join(out))
+    raise ValueError("unfinished array")
+
+
+def player_links(html: str, slug: str) -> dict:
+    """{songid: MP3 address} from the album page's music player (`mediaPath + file + extension` for
+    each of its `tracks`). Only addresses on khinsider's file servers for this album, ending in .mp3;
+    anything unexpected gives {} and the track pages are read as before."""
+    if not html or "songid" not in html:
+        return {}
+    for script in re.findall(r"<script\b[^>]*>(.*?)</script\s*>", html, re.S | re.I):
+        for code in unpack(script) + [script]:
+            m = re.search(r"\btracks\s*=\s*\[", code)
+            if m is None:
+                continue
+            try:
+                tracks = _js_array(code[m.end() - 1:])
+                prefix = re.search(r"\bmediaPath\s*=\s*(" + _JS_STRING + ")", code)
+                suffix = re.search(r"\bextension\s*=\s*(" + _JS_STRING + ")", code)
+                prefix = _js_string(prefix.group(1)) if prefix else ""
+                suffix = _js_string(suffix.group(1)) if suffix else ""
+            except (ValueError, TypeError):
+                continue
+            out = {}
+            for t in tracks if isinstance(tracks, list) else []:
+                if not isinstance(t, dict) or not isinstance(t.get("file"), str):
+                    return {}
+                sid = str(t.get("songid", ""))
+                url = t["file"] if t["file"].startswith("https://") else prefix + t["file"] + suffix
+                if not sid.isdigit() or not _good_mp3(url, slug):
+                    return {}
+                out[sid] = url
+            if out:
+                return out
+    return {}
+
+
+# where khinsider's files are: (scheme, host and its subdomains); tests add their own server
+FILE_ORIGINS = [("https", "vgmtreasurechest.com")]
+
+
+def _good_mp3(url: str, slug: str) -> bool:
+    try:
+        u = urlsplit(url)
+        host = u.hostname or ""
+        parts = u.path.strip("/").split("/")
+        port = u.port
+    except ValueError:
+        return False
+    origin = any(u.scheme == sch and (host == h or host.endswith("." + h)) for sch, h in FILE_ORIGINS)
+    return (origin and not u.username and (port in (None, 443) or host == "127.0.0.1")
+            and len(parts) >= 4 and parts[0] == "soundtracks" and unquote(parts[1]) == unquote(slug)
+            and all(unquote(p) not in (".", "..") for p in parts)
+            and unquote(parts[-1]).lower().endswith(".mp3") and not any(ord(c) < 32 for c in url))

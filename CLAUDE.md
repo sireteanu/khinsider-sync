@@ -66,6 +66,13 @@ tests/  conftest (app_factory + API helpers), mock_site, fixtures/ (real markup 
   (host and a per-album token vary), so **the download address is only known from the track page**:
   `engine.Resolver` reads it right before the download (one request per track, cached for its other
   formats). File names are the page's name decoded twice with the format's extension.
+- **MP3 addresses are also on the album page**: its music player is a packed script (Dean Edwards'
+  packer, base 62) with `mediaPath='https://'`, `extension=''` and `tracks=[{track, name, length,
+  songid, file: "vgmtreasurechest.com/soundtracks/<slug>/<per-track token>/<name>.mp3"}]`; each
+  `#songlist` row has the same `songid` (`.playlistAddTo[songid]`). `parse.player_links` reads it
+  statically (never runs it; only this album's .mp3 on vgmtreasurechest, else `{}`), `files.direct`
+  keeps it, `Resolver` uses it first (setting `player_links`) and `source_failed` (Downloader
+  `_other_source`) falls back to the track page. Fixture: `album_player_bead.html` (exact copy).
 - Cloudflare guards the pages: data-center addresses (this cloud workspace) get the "Just a moment..."
   browser check (403, `cf-mitigated: challenge`) for every page whatever the fingerprint; the file
   servers still answer. `util.is_challenge` -> `ChallengeError` stops scans, `ResolveError(pause=...)`
@@ -103,7 +110,7 @@ tests/  conftest (app_factory + API helpers), mock_site, fixtures/ (real markup 
 4. **Moving, not re-downloading**: when an album's place changes (layout, Saved as, a renamed
    album), the next sync moves files the manifest says it saved (`Engine._relocate`,
    `Manifest.by_url/move`) and removes the folders left empty.
-5. Downloads go through Rom Sync's Downloader unchanged apart from `resolve`: `.part` + rename,
+5. Downloads go through Rom Sync's Downloader unchanged apart from `resolve` (and its `source_failed` fallback): `.part` + rename,
    Range/If-Range resume, HTML-instead-of-file detection, MAGIC check (mp3/flac/ogg/jpg/png),
    DownloadGate, outage waiting (site errors also from the track page, `ResolveError.status`),
    daily-limit pause. A track page without the format's link fails that file for good (`permanent`).

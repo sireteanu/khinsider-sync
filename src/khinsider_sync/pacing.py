@@ -1,7 +1,7 @@
 """Going easy on khinsider: limits the user sets so a big queue is spread over hours or days.
 
   pages_per_minute   khinsider page requests (browse lists, album pages, track pages - the part
-                     Cloudflare guards; every downloaded track needs its track page) - PageRate,
+                     Cloudflare guards; a track page per file not taken from the album page's player) - PageRate,
                      shared by everything a job does
   files_per_hour     files downloaded in any 60 minutes      } a sync stops when one is reached and
   albums_per_day     albums started in any 24 hours          } the app carries on by itself when the

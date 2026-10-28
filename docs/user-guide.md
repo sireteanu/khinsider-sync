@@ -73,10 +73,12 @@ Changing folders later is safe: the next sync moves what you have; nothing is do
 khinsider is protected by Cloudflare, which starts asking for a "browser check" when a connection
 reads pages too fast - then nothing can be read for a while. In Settings → **Go easy on khinsider**:
 
-- **Page reads a minute** (60 by default): every downloaded track needs its track page, so this sets
-  the pace of a big sync - it's the most files a minute the app can download. At 10, that's 10
-  files a minute (about 0.5-1 MB/s for MP3s) however fast your connection is. A change applies
-  at once, also to a sync under way.
+- **Page reads a minute** (60 by default): each album's page counts, and for formats other than
+  MP3 each track's page too (its download address is only there). **MP3 files need no track page**:
+  their addresses come from the album page's music player, so an MP3 album is one page read
+  however many tracks it has (setting **Take MP3 addresses from the album page's music player**, on
+  by default). For FLAC this is the most files a minute: at 10, about 10 files a minute. A change
+  applies at once, also to a sync under way.
 - **Files an hour** and **Albums a day**: spread a long list over hours or days.
 - **Albums at a time** (1 by default): how many new album pages a sync reads before downloading
   those albums. With 1, it reads one album's page, downloads that album, then reads the next - it
@@ -100,7 +102,8 @@ so far, and the line under it says how many albums follow - their size isn't kno
 pages are read.
 
 The speed in the log after each file is that file's own download speed. The overall speed is
-mostly set by **Page reads a minute** (one track page per file).
+set by your connection for MP3s, and by **Page reads a minute** for other formats (one track page
+per file).
 
 If khinsider goes down, downloads wait for it and carry on by themselves. If it starts sending web
 pages instead of files (too many downloads), the sync pauses; the next one finishes the job.

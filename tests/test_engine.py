@@ -23,8 +23,8 @@ def test_downloads_mp3_and_images_into_the_album_folder(site, app_factory):
     assert st["sync"]["new"] == 4 and st["sync"]["failed"] == 0
     with open(c.data / "Super Mario World" / "01. Nintendo Logo.mp3", "rb") as f:
         assert f.read() == site.content(SMW, "01. Nintendo Logo.mp3")
-    # one track page per track (for its download link), never for the image
-    assert len(site.track_pages()) == 3
+    # the MP3 addresses come from the album page's player: no track page at all
+    assert len(site.track_pages()) == 0
     assert all(f["local"] == "new" for f in album(c, SMW)["files"] if f["wanted"])
 
 

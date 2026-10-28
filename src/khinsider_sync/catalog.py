@@ -54,6 +54,7 @@ DEFAULT_SETTINGS = {
     "files_per_hour": 0,            # files downloaded in any hour (0 = no limit); the rest waits
     "albums_per_day": 0,            # albums started in any 24 hours (0 = no limit); the rest waits
     "albums_per_batch": 1,          # album pages a sync reads (one at a time) before downloading them; then the next batch
+    "player_links": True,           # MP3 addresses from the album page's player: no track page for them
     "challenge_retries": 0,         # set by the app: browser checks in a row (each doubles the wait)
     "queue_resume_at": 0,           # set by the app: a limit stopped a sync - it carries on at this time
     "check_folder_days": 0,         # with the schedule on: check the download folder for deleted files before a
@@ -281,6 +282,8 @@ class Catalog:
             self.db.execute("ALTER TABLE files ADD COLUMN cover TEXT")
         if "tags" not in cols:                   # 1.0.11: missing tags filled in (covers.py)
             self.db.execute("ALTER TABLE files ADD COLUMN tags TEXT")
+        if "direct" not in cols:                 # 1.0.22: the MP3 address from the album page's player
+            self.db.execute("ALTER TABLE files ADD COLUMN direct TEXT")
         if "changed" not in {r[1] for r in self.db.execute("PRAGMA table_info(albums)")}:
             # 1.0.11: when khinsider replaced the album with another version (seen in its newest list)
             self.db.execute("ALTER TABLE albums ADD COLUMN changed TEXT")
@@ -503,13 +506,15 @@ class Catalog:
                     f = {"name": name, "kind": "track", "ext": ext, "disc": t["disc"], "num": t["num"],
                          "title": t["title"], "pos": pos * 100 + k}
                     rows.append((f"{t['page']}#{ext}", slug, t["page"], ext, "track", t["disc"], t["num"], name,
-                                 t["title"], t["duration"], rel_of(album, f), size, size_bytes(size), f["pos"]))
+                                 t["title"], t["duration"], rel_of(album, f), size, size_bytes(size), f["pos"],
+                                 t.get("mp3") if ext == ".mp3" else None))
             for pos, img in enumerate(page["images"]):
                 name = name_of_file(unquote(urlsplit(img).path.rsplit("/", 1)[-1]))
                 ext = "." + name.rsplit(".", 1)[-1].lower() if "." in name else ""
                 f = {"name": name, "kind": "art", "ext": ext, "disc": "", "num": "", "title": "",
                      "pos": 100_000_000 + pos}
-                rows.append((img, slug, None, ext, "art", "", "", name, "", "", rel_of(album, f), None, 0, f["pos"]))
+                rows.append((img, slug, None, ext, "art", "", "", name, "", "", rel_of(album, f), None, 0, f["pos"],
+                             None))
             keep = {r[0] for r in rows}
             old = {r[0] for r in self.db.execute("SELECT url FROM files WHERE album=?", (slug,))}
             gone = old - keep
@@ -517,11 +522,11 @@ class Catalog:
                 self.db.executemany("DELETE FROM files WHERE url=?", [(u,) for u in gone])
             self.db.executemany(
                 "INSERT INTO files(url, album, page, ext, kind, disc, num, name, title, duration, rel, size, "
-                "bytes, pos) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(url) DO UPDATE SET "
+                "bytes, pos, direct) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(url) DO UPDATE SET "
                 "album=excluded.album, page=excluded.page, ext=excluded.ext, kind=excluded.kind, "
                 "disc=excluded.disc, num=excluded.num, name=excluded.name, title=excluded.title, "
                 "duration=excluded.duration, rel=excluded.rel, size=excluded.size, bytes=excluded.bytes, "
-                "pos=excluded.pos", rows)
+                "pos=excluded.pos, direct=excluded.direct", rows)
         self.changed()
         return len(rows)
 
@@ -599,6 +604,17 @@ class Catalog:
                 q = ("SELECT url, rel, album, ext, kind, size, page FROM files WHERE album IN (%s) "
                      "ORDER BY album, pos, ext" % ",".join("?" * len(chunk)))
                 out += self.db.execute(q, chunk).fetchall()
+        return out
+
+    def direct_links(self, albums: Iterable[str]) -> dict:
+        """{catalog address: MP3 address from the album page's player} of the given albums."""
+        out = {}
+        albums = list(albums)
+        with self.lock:
+            for i in range(0, len(albums), 500):
+                chunk = albums[i:i + 500]
+                out.update(self.db.execute("SELECT url, direct FROM files WHERE direct IS NOT NULL AND album IN (%s)"
+                                           % ",".join("?" * len(chunk)), chunk).fetchall())
         return out
 
     def forget_missing(self, slug: str, intact: Callable[[str, Optional[int]], bool]) -> list:

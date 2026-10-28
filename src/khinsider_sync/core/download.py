@@ -263,6 +263,12 @@ class Downloader:
             except OSError as e:
                 log.debug("could not set permissions on %s: %s", d, e)
 
+    def _other_source(self, url: str, src: str) -> bool:
+        """The address `resolve` gave didn't deliver the file: does it know another way (khinsider:
+        the track page instead of the album page's player address)? Then try that, no retry used."""
+        other = getattr(self.resolve, "source_failed", None)
+        return bool(other and src != url and other(url, src))
+
     async def _download(self, url, rel, info, action, reason):
         cfg, man = self.cfg, self.manifest
         if not self.allowed(url):
@@ -325,10 +331,14 @@ class Downloader:
                         pushback = slow_down = status in THROTTLE_STATUSES
                         pause = _retry_after(r.headers.get("retry-after"))
                         raise FetchError(err)
+                    if status not in (200, 206) and self._other_source(url, src):
+                        continue                            # that address didn't work: the usual one now
                     if status not in (200, 206):
                         self._failed(url, rel, f"HTTP {status}")
                         return DONE
                     ctype = r.headers.get("content-type", "").lower()
+                    if "text/html" in ctype and self._other_source(url, src):
+                        continue
                     if "text/html" in ctype:
                         body = (await r.aread())[:400].decode("utf-8", "replace")
                         title = re.search(r"<title>(.*?)</title>", body, re.I | re.S)
@@ -396,6 +406,8 @@ class Downloader:
                         head = f.read(8)
                     if not head.startswith(MAGIC[ext]):
                         os.remove(part)
+                        if self._other_source(url, src):
+                            continue
                         self._failed(url, rel, f"not a valid {ext} file (removed)")
                         return DONE
                 os.replace(part, dest)
