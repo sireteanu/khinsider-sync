@@ -98,14 +98,16 @@ def test_a_long_list_is_done_in_batches(site_factory, app_factory):
     select(c, "p:windows")                        # 3 albums, none read yet
     site.reset_log()
     st = sync(c)
-    assert len(album_page_requests(site)) == 2, "two pages, not all of them up front"
-    assert st["sync"]["albums"] == 2
     assert any("3 ticked albums haven't been read yet: this sync does 2 of them" in m for m in log_lines(st))
-    assert st["sync"]["albums_later"] == 1, "the Activity panel says one more album follows"
-    assert st["queue_resume_at"] and st["queue_resume_at"] <= time.time() + 1, "the next batch right away"
-    assert c.portal.call(c.app.state.engine.resume_queue)
-    st = wait(c)
-    assert st["sync"]["albums"] == 1 and not st["queue_resume_at"]
+    # two pages, their downloads, then the third page - in the same job, no gap and no second run
+    paths = [p for p, _ in site.requests]
+    pages = album_page_requests(site)
+    assert len(pages) == 3
+    first_track = next(i for i, p in enumerate(paths) if p.startswith("/game-soundtracks/album/") and p.count("/") == 4)
+    assert paths.index(pages[1]) < first_track < paths.index(pages[2])
+    assert not st["queue_resume_at"]
+    last = c.app.state.engine.catalog.history(1)[0]
+    assert last["summary"]["sync"]["batches"] == 2 and last["summary"]["sync"]["albums"] == 3
     assert len({f.split("/")[0] for f in on_disk(c.data)}) == 3
 
 
@@ -115,5 +117,9 @@ def test_one_album_at_a_time(site, app_factory):
     select(c, "p:windows")
     site.reset_log()
     st = sync(c)
-    assert len(album_page_requests(site)) == 1 and st["sync"]["albums"] == 1
     assert any("this sync does 1 of them" in m for m in log_lines(st))
+    # page, its downloads, next page, its downloads ...: never two album pages in a row
+    kinds = ["page" if p.count("/") == 3 else "track" for p, _ in site.requests
+             if p.startswith("/game-soundtracks/album/")]
+    assert kinds.count("page") == 3
+    assert all(not (a == b == "page") for a, b in zip(kinds, kinds[1:])), kinds

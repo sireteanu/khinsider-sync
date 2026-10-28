@@ -71,14 +71,14 @@ khinsider is protected by Cloudflare, which starts asking for a "browser check" 
 reads pages too fast - then nothing can be read for a while. In Settings → **Go easy on khinsider**:
 
 - **Page reads a minute** (60 by default): every downloaded track needs its track page, so this sets
-  the pace of a big sync.
+  the pace of a big sync - it's the most files a minute the app can download. At 10, that's 10
+  files a minute (about 0.5-1 MB/s for MP3s) however fast your connection is.
 - **Files an hour** and **Albums a day**: spread a long list over hours or days.
-
 - **Albums at a time** (1 by default): how many new album pages a sync reads before downloading
   those albums. With 1, it reads one album's page, downloads that album, then reads the next - it
-  never asks for a pile of pages in a row. It goes on with the next albums by itself.
+  never asks for a pile of pages in a row. It goes straight on with the next albums in the same sync.
 
- When a limit is reached it stops cleanly and carries on by itself when there's room again.
+When a limit is reached it stops cleanly and carries on by itself when there's room again.
 
 ## 6. Sync
 
@@ -86,10 +86,13 @@ Click **Sync ticked**. The Activity panel shows how much is left and how long it
 Downloading box shows each file. You can **Stop** at any time - the next sync continues where it
 stopped, also after a restart or a power cut.
 
-A long list of new albums goes **one run at a time** (see Albums at a time above). The box is then
-called **This run**: its size and time cover only the albums read so far, and the line under it
-says how many albums follow - their size isn't known until their pages are read. The app carries
-on with them by itself.
+A long list of new albums goes **a few albums at a time** (see Albums at a time above), all in
+the same sync. The box is then called **This run**: its size and time cover only the albums read
+so far, and the line under it says how many albums follow - their size isn't known until their
+pages are read.
+
+The speed in the log after each file is that file's own download speed. The overall speed is
+mostly set by **Page reads a minute** (one track page per file).
 
 If khinsider goes down, downloads wait for it and carry on by themselves. If it starts sending web
 pages instead of files (too many downloads), the sync pauses; the next one finishes the job.

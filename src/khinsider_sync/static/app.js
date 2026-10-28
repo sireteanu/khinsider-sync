@@ -871,8 +871,8 @@ function renderEta(st, busy) {
   // a long list goes one run at a time: say what follows, so the time isn't taken for the whole job
   $("#eta-label").textContent = more ? "This run" : "This sync";
   const next = [];
-  if (s.albums_later) next.push(`${nAlbums(s.albums_later)} still to read and download - the app carries on with them by itself, `
-    + `one run after another. Their size isn't known until their pages are read.`);
+  if (s.albums_later) next.push(`${nAlbums(s.albums_later)} still to read and download in this sync, `
+    + `one after another. Their size isn't known until their pages are read.`);
   if (s.albums_held) next.push(`${nAlbums(s.albums_held)} wait for room under Albums a day`
     + (s.held_until ? ` (from ${new Date(s.held_until * 1000).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" })})` : "") + ".");
   $("#eta-next").hidden = !next.length;

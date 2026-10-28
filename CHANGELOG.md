@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.0.18] - 2026-10-27
+
+### Improved
+- A long list no longer stops between albums: the next album's page is read and downloaded right
+  away in the same sync (it used to end the sync and wait up to 30 s for the next one), and you get
+  one notification at the end, not one per album.
+
+### Fixed
+- The speed shown after each file in the log counted the wait for its track page, so files looked
+  much slower than they were. It is now the file's own download speed.
+
+### Changed
+- Settings explains that **Page reads a minute** is also the most files a minute (one track page per
+  file).
+
 ## [1.0.17] - 2026-10-27
 
 ### Improved

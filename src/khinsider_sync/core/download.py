@@ -302,9 +302,9 @@ class Downloader:
                     headers["If-None-Match"] = rec.etag
                 headers["If-Modified-Since"] = (rec.last_modified if rec and rec.last_modified
                                                 else http_date(os.stat(dest).st_mtime))
-            t0 = time.monotonic()
             try:
                 src = await self.resolve(url) if self.resolve else url
+                t0 = time.monotonic()                   # the file's own speed: not the wait for its address
                 async with self.client.stream("GET", src, headers=headers) as r:
                     status = r.status_code
                     lm, etag = r.headers.get("last-modified"), r.headers.get("etag")

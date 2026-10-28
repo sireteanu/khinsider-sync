@@ -124,7 +124,7 @@ tests/  conftest (app_factory + API helpers), mock_site, fixtures/ (real markup 
    whole job (`pacing.PageRate`, also the Resolver's track pages); downloads start at 2 parallel and
    ramp; `files_per_hour` / `albums_per_day` (`pacing.Window`, catalog `quota`) stop a sync cleanly and
    `queue_resume_at` + `Engine.resume_queue` carry on later; a sync reads at most `albums_per_batch` (default
-   `READ_BATCH` = 1) unread album pages, one at a time, the rest follow in the next run. Respect robots.txt
+   `READ_BATCH` = 1) unread album pages, one at a time, the next batches follow in the same job (`_run` loop, `_add_runs`). Respect robots.txt
    (it only disallows /unavailable) - fetched once a day in a client of its own (`Engine._robots`), never in
    front of page requests: a session opening with robots.txt got the Cloudflare check.
 

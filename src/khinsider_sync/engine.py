@@ -544,6 +544,12 @@ class Engine:
                         summary["read"] = await self._scanner(client, robots).read_albums(slugs)
                     if kind in ("sync", "scan+sync", "quick+sync") and not self.stop_requested:
                         summary["sync"] = await self._sync(client, robots, albums if kind == "sync" else None)
+                        # a long list goes a batch at a time (albums_per_batch): go straight on with the
+                        # next one in this job - no gap between albums, one notification at the end
+                        while (not self.stop_requested and (summary["sync"].get("next_batch") or 0)
+                               and 0 < (summary["sync"].get("resume_at") or 0) <= time.time() + 1):
+                            more = await self._sync(client, robots, None)
+                            summary["sync"] = _add_runs(summary["sync"], more)
             self.job["phase"] = "stopped" if self.stop_requested else "done"
             if self.scanner is not None and self.scanner.challenged:
                 self.job["message"] = "khinsider asks for a browser check (Cloudflare) - see the log"
@@ -1472,6 +1478,21 @@ class Engine:
                                gate=g.describe() if g else "",
                                active=[{"rel": r, "have": h, "total": t} for r, (h, t) in active[:100]])
         return out
+
+
+_RUN_SUMS = ("total", "albums", "to_fetch", "new", "updated", "resumed", "up to date", "already in folder",
+             "failed", "bytes", "track_pages")
+
+
+def _add_runs(a: dict, b: dict) -> dict:
+    """One job's sync summary over several batches: counts add up, the last batch says what's next."""
+    out = dict(b)
+    for k in _RUN_SUMS:
+        if isinstance(a.get(k), (int, float)) or isinstance(b.get(k), (int, float)):
+            out[k] = (a.get(k) or 0) + (b.get(k) or 0)
+    out["got_albums"] = sorted(set(a.get("got_albums") or []) | set(b.get("got_albums") or []))
+    out["batches"] = (a.get("batches") or 1) + 1
+    return out
 
 
 __all__ = ["Engine", "ALBUM", "PLATFORM", "clean_place", "parse_mode", "LAYOUTS"]
