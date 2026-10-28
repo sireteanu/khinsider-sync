@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "flaresolverr": {
+      "source": "modbender/skill-library-mcp",
+      "sourceType": "github",
+      "skillPath": "data/flaresolverr/SKILL.md",
+      "computedHash": "3feab1de38394ee5eff71cc172e12173138d80456e1b80d870a301a40402d62b"
+    }
+  }
+}

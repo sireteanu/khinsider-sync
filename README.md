@@ -50,7 +50,7 @@ modest, don't sync the whole site, and consider [donating](https://downloads.khi
 | Album details | Click an album: its tracks per disc with every format and size, its images, what is synced, where it is saved. The album's page is read the first time you open it. |
 | Formats | **Your own list, in your order**: tick the formats you want (and the album images) and move them up or down; an album gets either only the first ticked format it has, or every ticked one (e.g. FLAC *and* MP3). Files download in that order - every FLAC file of the sync before the first MP3. Quick picks: MP3 (default), FLAC else MP3, FLAC and MP3, best quality (FLAC → WAV → … → M4A → OPUS → OGG → MP3), everything. Any album can have **its own formats** (e.g. FLAC for favourites). Album images (covers, scans) are saved too unless you turn that off, optionally in an `Art` folder. |
 | Track names | As khinsider names them (`1-01. Title.mp3`), or numbered from the album page's disc and track columns (`01 - Title.mp3`, `1-01 - Title.flac`). |
-| Getting through | Requests look like Chrome (its TLS fingerprint and headers, via curl_cffi) and name khinsider as the Referer, as khi-explorer does, so Cloudflare's bot protection lets them through. Can be turned off. |
+| Getting through | Requests look like Chrome (its TLS fingerprint and headers, via curl_cffi) and name khinsider as the Referer, as khi-explorer does, so Cloudflare's bot protection lets them through. Can be turned off. Optionally **FlareSolverr** gets a page past Cloudflare's browser check when one comes (see Syncing). |
 | Folders | One folder per album, named after the album (clashing names get the type and year added). Optionally grouped by platform, type or year. **Saved as** puts one album anywhere you like. Changing either **moves** what you already have instead of downloading it again. |
 | Sync | Reads each ticked album's page once (the first time it's synced or opened), then downloads what's missing or half-finished (`.part`, resumed). khinsider doesn't change albums once they're up, so **an album that is downloaded is done**: later syncs skip it without a request or a look at the disk. |
 | Downloaded albums | The album list marks every album as **Downloaded** or **Partly downloaded** (with the date in its tooltip and window), the filter shows Downloaded / Partly downloaded / Not downloaded, and the top strip counts "12 of 13 albums downloaded". **Check files** in an album's window looks for files you deleted; **Check download folder** (☰ menu) does that for every downloaded album at once - disk only, no requests. The next sync downloads the missing files again. |
@@ -112,6 +112,9 @@ The image is built on the server from this GitHub repository; no image registry 
    ```
 3. **Compose Up**, then turn on **Autostart** for the stack. Open `http://SERVER:8485/`.
 4. To update: click **Compose Up** again. Your catalog, ticks and downloads are kept.
+5. Optional: uncomment the `flaresolverr` service and `FLARESOLVERR_URL` in the compose file (or run
+   FlareSolverr anywhere and enter its address in Settings) - it gets pages past Cloudflare's browser
+   check when one comes (see Syncing).
 
 Port 8485 lets it run next to Rom Sync (8484). Alternatives: [`docker/unraid-update.sh`](docker/unraid-update.sh)
 (plain `docker build` / `docker run`), [`docker-compose.yml`](docker-compose.yml) (local checkout),
@@ -251,6 +254,15 @@ doesn't change albums). For every file of the other ticked albums (formats as ab
   through - a scan stops at once (it is "incomplete", so it removes nothing) and a sync pauses; nothing is
   marked failed and the log says so in one line. Downloads themselves come from the vgmtreasurechest.com
   file servers, which didn't ask for the check in October 2026.
+- **FlareSolverr** (optional, Settings → FlareSolverr address, or `FLARESOLVERR_URL`): when a page gets
+  the check, the app asks a [FlareSolverr](https://github.com/FlareSolverr/FlareSolverr) server for that
+  page (one request at a time; GET pages only - never files or the sign-in). Its `cf_clearance` cookie
+  goes into the client's one cookie store and its User-Agent goes out with every later khinsider
+  request, the page is asked for again directly, and the following pages normally go through with it.
+  The cookie is kept between jobs. If direct requests still get the check, every checked page comes from
+  FlareSolverr's own copy (slower) until a direct one goes through again. If FlareSolverr can't help
+  (not reachable, an error), nothing is tried again for a minute and the usual waiting above takes
+  over. The page limits ("Go easy on khinsider") still apply. **Test** in Settings checks it's reachable.
 - **Download limit**: when the site keeps answering with an HTML page instead of files while nothing
   else gets through, downloads pause ("Paused: …") and stay queued for the next sync.
 - **Free space**: downloads pause before the disk would drop below "Keep free on disk".
@@ -305,6 +317,7 @@ Stored in the catalog (`settings` table); changed in the Settings dialog or `POS
 | `embed_cover` | `false` | Put the album's cover into each downloaded music file that has no picture (MP3, FLAC, M4A, OGG/Opus; needs mutagen) |
 | `folder_art` | `false` | Save each downloaded album's cover (its first image) as `folder.jpg` / `folder.png`, also when images aren't synced |
 | `impersonate` | `true` | Look like Chrome (needs curl_cffi) |
+| `flaresolverr_url` | `""` | FlareSolverr server (`http://host:8191`) asked when a page gets Cloudflare's browser check; empty = off, or `FLARESOLVERR_URL` |
 | `parallel` | `auto` | `auto` or a fixed number of parallel downloads |
 | `parallel_max` | `8` | Upper limit for `auto` |
 | `max_rate` | `""` | Overall speed limit, e.g. `10M` (empty = unlimited) |
@@ -346,6 +359,7 @@ Stored in the catalog (`settings` table); changed in the Settings dialog or `POS
 | `--password` | `KHINSIDER_PASSWORD` | none | Ask for this password (HTTP Basic, any user name); `/api/health` stays open |
 | `--lock-data` | `KHINSIDER_DATA_LOCKED=1` | off (on in Docker) | Download folder can't be changed in the page |
 | `--no-browser` | `KHINSIDER_NO_BROWSER=1` | off (on in Docker) | Don't open a browser tab |
+| - | `FLARESOLVERR_URL` | none | FlareSolverr address used when the setting is empty (e.g. `http://flaresolverr:8191`) |
 | `--site URL` | `KHINSIDER_SITE` | `https://downloads.khinsider.com/` | Hidden; for tests |
 
 Docker only: `PUID`/`PGID` (default 99/100 = Unraid nobody/users), `UMASK` (default `000`), `TZ`
@@ -376,6 +390,7 @@ All JSON; the page uses nothing else.
 | `GET /api/albums?platform=&q=&type=&show=&sort=&dir=&offset=&limit=` | Albums (`platform` `-` = without platform; `type` as for platforms; `show` `all`/`ticked`/`downloaded`/`partly`/`notdownloaded`/`failed`/`unread`; `sort` `name`/`year`/`added`/`new`/`size`/`synced`) -> `{total, offset, albums}`; the filtered, sorted view is kept between requests (until the catalog, ticks or format settings change), so the page asks for one slice at a time while scrolling; sorted by name, also `letters: {"#": 0, "A": 412, ...}` - where each first letter starts in the whole view (`#` = digits and symbols) |
 | `GET /api/album?slug=` | One album, where it is saved (`dir`, `place`), its files with `wanted` and sync state, `upgrade: {have, better, pending}` (downloaded audio formats, better ones the album has, a waiting upgrade) |
 | `POST /api/account/list` | Start "Download my khinsider list" (job kind `list`) |
+| `POST /api/flaresolverr/check` | Is the FlareSolverr from Settings reachable -> `{ok, version, message, url, solves, pages}` |
 | `POST /api/account/check` | Sign in to khinsider with the saved account now -> `{state, message, user, configured, at}` |
 | `POST /api/album/read` `{slug}` | Read that album's page now -> `{read, files, renamed, slug}` |
 | `POST /api/album/check` `{slug}` | Look on disk for that album's downloaded files; missing ones are downloaded by the next sync -> `{slug, missing}` |
@@ -417,6 +432,8 @@ src/khinsider_sync/
   cleanup.py    Clean up: walk the download folder, judge files, delete confirmed ones
   static/       index.html, app.css, app.js - no build step, no CDN
   core/         the sync engine from Rom Sync (download.py with the `resolve` hook, sync.py, limits.py ...)
+    solver.py   FlareSolverr fallback: SolverTransport wraps the client's transport; on a browser check it asks
+                FlareSolverr, takes its cookie + User-Agent (SolveState, kept between jobs), tries again directly
     browser.py  ChromeTransport: httpx transport that sends requests through curl_cffi as Chrome
 tests/          pytest against tests/mock_site.py (a copy of khinsider's markup; samples of the real
                 pages in tests/fixtures); never the real site

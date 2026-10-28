@@ -21,6 +21,16 @@ services:
       - UMASK=000
       - TZ=America/New_York
       # - KHINSIDER_PASSWORD=change-me
+      # - FLARESOLVERR_URL=http://flaresolverr:8191   # optional, see the flaresolverr service below
     labels:
       net.unraid.docker.webui: "http://[IP]:[PORT:8485]/"
     restart: on-failure            # restarts after a crash; stays off after "Shut down"
+
+  # Optional: FlareSolverr gets pages past Cloudflare's browser check when one comes. Uncomment this
+  # service and FLARESOLVERR_URL above (or set the address in Settings).
+  # flaresolverr:
+  #   image: ghcr.io/flaresolverr/flaresolverr:latest
+  #   container_name: flaresolverr
+  #   environment:
+  #     - TZ=America/New_York
+  #   restart: unless-stopped

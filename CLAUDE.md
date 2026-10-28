@@ -44,12 +44,18 @@ src/khinsider_sync/
     download.py Downloader: plan() + download(); `resolve` hook (ResolveError); run_item()
     sync.py     FileInfo, Manifest (<data>/.khinsider-sync.db, by_url()/move()), plan()
     limits.py   Limiter (page pacing), DownloadGate (auto parallel downloads), RateLimit
+    solver.py   FlareSolverr fallback (setting `flaresolverr_url` / env FLARESOLVERR_URL, off by default):
+                SolverTransport wraps the client's transport; on a browser check (GET khinsider pages only)
+                asks FlareSolverr, puts its cookie into the ONE cookie store and its User-Agent on later
+                requests (SolveState on the Engine, kept between jobs), retries directly; if still checked,
+                FlareSolverr's own copy of each checked page (html_only). Failure: 60 s cooldown, usual wait
     browser.py  ChromeTransport (httpx transport over curl_cffi impersonating Chrome; maps curl errors
                 to httpx exceptions, drops content-encoding because curl already decoded; curl's
                 session alone handles cookies - httpx's Cookie header is dropped)
     util.py / constants.py (formats, BEST_ORDER, MAGIC) / config.py
 tests/  conftest (app_factory + API helpers), mock_site, fixtures/ (real markup samples),
-        test_parse, test_app, test_engine, test_cleanup, test_changes, test_outage
+        test_parse, test_app, test_engine, test_cleanup, test_changes, test_outage, test_flaresolverr
+        (MockSite's mock FlareSolverr at <url>/flaresolverr: site.solver ok | html | fail)
 ```
 
 ## How khinsider works (verified in a browser, October 2026 - see README "Facts")
@@ -80,7 +86,9 @@ tests/  conftest (app_factory + API helpers), mock_site, fixtures/ (real markup 
   browser check (403, `cf-mitigated: challenge`) for every page whatever the fingerprint; the file
   servers still answer. `util.is_challenge` -> `ChallengeError` stops scans, `ResolveError(pause=...)`
   pauses syncs; nothing is marked failed. Then the sync only waits (`Engine._challenge_backoff`: 1 min,
-  then 10 min doubling to 2 h, `challenge_retries`, `queue_resume_at`). Never try to solve or get around the check.
+  then 10 min doubling to 2 h, `challenge_retries`, `queue_resume_at`). The only thing that gets past the
+  check is the owner's opt-in FlareSolverr (`core/solver.py`, added 1.0.31 at the owner's request); never
+  add any other way around it, and keep the page limits in force with it.
   An hour at 60 page reads a minute got the owner's home connection checked for every page. The check
   is per connection and time-based, not per request path: a sync's album page and "open album" are the
   same request. Often a single request gets it: a sync's album page was checked at 9:50:33, opening
@@ -181,6 +189,9 @@ tests/  conftest (app_factory + API helpers), mock_site, fixtures/ (real markup 
 - Every user-visible change gets a test against `MockSite`. **MockSite copies the live markup**; when
   the site changes, update `tests/fixtures/` from the real page first (browser), then the mock and
   `parse.py`. Use the `investigate-site` skill.
+- `.claude/skills/flaresolverr` is FlareSolverr's API reference (installed with `npx skills add
+  modbender/skill-library-mcp --skill flaresolverr`, pinned in `skills-lock.json`) - for working on
+  `core/solver.py`. The rule below still holds: it is no licence to fetch the real site.
 - **Tests and development never touch the real khinsider.com.** Only run against the real site when
   the user asks, and never start a large download unasked (the whole site is ~38 TB).
 - Keep saved settings working across versions: convert old keys instead of dropping a user's choices.

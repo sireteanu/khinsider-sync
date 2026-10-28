@@ -956,6 +956,20 @@ $("#account-list").addEventListener("click", async () => {
     $("#account-state").textContent = /busy/.test(String(err.message)) ? "Wait until the running job has finished." : String(err.message || err);
   }
 });
+$("#flaresolverr-check").addEventListener("click", async () => {
+  const out = $("#flaresolverr-state");
+  out.textContent = "Testing…";
+  try {
+    // the field as it is now: saved first, so the test uses what's typed
+    await api("/api/settings", { method: "POST", body: { flaresolverr_url: form.flaresolverr_url.value.trim() } });
+    const r = await api("/api/flaresolverr/check", { method: "POST", body: {} });
+    out.textContent = r.ok ? `Reachable${r.version ? " - version " + r.version : ""}` +
+      (r.solves ? ` - got past the check ${r.solves} time${r.solves === 1 ? "" : "s"} since the app started` : "")
+      : r.message;
+  } catch (err) {
+    out.textContent = String(err.message || err);
+  }
+});
 $("#account-check").addEventListener("click", async () => {
   $("#account-state").textContent = "Signing in…";
   try {
@@ -1073,6 +1087,8 @@ $("#btn-settings").addEventListener("click", async () => {
   $("#notify-result").textContent = "";
   form.track_names.value = s.track_names || "site";
   form.impersonate.checked = s.impersonate !== false;
+  form.flaresolverr_url.value = s.flaresolverr_url || "";
+  $("#flaresolverr-state").textContent = "";
   form.account_user.value = s.account_user || "";
   form.account_password.value = "";
   form.account_password.placeholder = s.account_password_set ? "saved - type to change" : "";
@@ -1175,6 +1191,7 @@ $("#settings-save").addEventListener("click", async (e) => {
     notify_on: ["downloads", "new_albums", "problems"].filter((e) => form["notify_" + e].checked),
     track_names: form.track_names.value,
     impersonate: form.impersonate.checked,
+    flaresolverr_url: form.flaresolverr_url.value.trim(),
     player_links: form.player_links.checked,
     account_user: form.account_user.value.trim(),
     account_zips: form.account_zips.checked,

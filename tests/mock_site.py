@@ -36,6 +36,9 @@ Attributes you can change while a test runs:
   down_after  set `down` to 522 once this many downloads have completed (None = never)
   challenge   True: every page (not the files) answers Cloudflare's browser check - 403 with
               cf-mitigated: challenge and "Just a moment..." (what a data-center address gets)
+  solver      the mock FlareSolverr at <url>/flaresolverr: "ok" (its cf_clearance cookie gets through the
+              check, with its User-Agent), "html" (it gets the page, but its cookie doesn't help direct
+              requests), "fail" (it answers with an error); solver_calls lists the pages it was asked for
   broken_images  image names whose files answer 404 although the album page lists them
   robots_extra  more robots.txt lines (robots.txt is sent as text/html, like the live site)
 Methods: modify(slug, file, grow) replaces a file; remove(slug) takes an album off the site;
@@ -191,6 +194,8 @@ class MockSite:
         self.rejected = 0
         self.slow_all = False
         self.challenge = False             # pages answer Cloudflare's browser check (403, cf-mitigated)
+        self.solver = "ok"                 # mock FlareSolverr: ok | html | fail (see the docstring)
+        self.solver_calls: list = []
         self.robots_extra = ""             # more robots.txt lines
         self.broken_images: set = set()    # image names that answer 404 (listed on the page, file gone)
         self.player = True                 # album pages carry the music player's packed track list
@@ -241,7 +246,10 @@ class MockSite:
                 if path == "/robots.txt":                     # the live site sends it as text/html
                     return self._send(200, "\nUser-agent: *\r\nDisallow: /unavailable" + site.robots_extra,
                                       "text/html; charset=UTF-8")
-                if site.challenge and not path.startswith("/soundtracks/"):
+                if path.rstrip("/") == "/flaresolverr":
+                    return self._send(200, json.dumps({"msg": "FlareSolverr is ready!", "version": "3.3.21"}),
+                                      "application/json")
+                if site.challenge and not path.startswith("/soundtracks/") and not site.cleared(self.headers):
                     return self._send(403, '<!DOCTYPE html><html lang="en-US"><head><title>Just a moment...</title>'
                                       '</head><body>Enable JavaScript and cookies to continue</body></html>',
                                       extra=[("cf-mitigated", "challenge"), ("Server", "cloudflare")])
@@ -280,6 +288,8 @@ class MockSite:
             def do_POST(self):  # noqa: N802
                 u = up.urlparse(self.path)
                 body = self.rfile.read(int(self.headers.get("Content-Length") or 0)).decode()
+                if u.path == "/flaresolverr/v1":
+                    return self._send(200, json.dumps(site.solve(json.loads(body))), "application/json")
                 with site._lock:
                     site.requests.append((self.path, {k.title(): v for k, v in self.headers.items()}))
                 if site.challenge:
@@ -648,6 +658,36 @@ class MockSite:
 
     # ---- khinsider accounts (tests/fixtures/forum_login.html, cp_*.html) ----
     XF_TOKEN = "1793220188,0123456789abcdef0123456789abcdef"
+
+    CLEARANCE = "mock-clearance-token"
+    SOLVER_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"
+
+    def cleared(self, headers) -> bool:
+        """Past Cloudflare's check: the mock FlareSolverr's own browser, or its cookie with its User-Agent."""
+        if headers.get("X-Mock-Browser") == "1":
+            return True
+        if self.solver != "ok" or headers.get("User-Agent") != self.SOLVER_UA:
+            return False
+        cookies = [part.strip() for part in (headers.get("Cookie") or "").split(";")]
+        return f"cf_clearance={self.CLEARANCE}" in cookies
+
+    def solve(self, req: dict) -> dict:
+        """The mock FlareSolverr's answer to {"cmd": "request.get", "url": ...}."""
+        self.solver_calls.append(req.get("url"))
+        if self.solver == "fail" or req.get("cmd") != "request.get":
+            return {"status": "error", "message": "Error: Error solving the challenge. Timeout after 60.0 seconds."}
+        import urllib.error
+        import urllib.request
+        try:
+            with urllib.request.urlopen(urllib.request.Request(req["url"], headers={"X-Mock-Browser": "1"})) as r:
+                status, final, html = r.status, r.geturl(), r.read().decode()
+        except urllib.error.HTTPError as e:
+            status, final, html = e.code, req["url"], e.read().decode()
+        host = up.urlparse(self.url).hostname
+        return {"status": "ok", "message": "Challenge solved!", "solution": {
+            "url": final, "status": status, "headers": {}, "response": html, "userAgent": self.SOLVER_UA,
+            "cookies": [{"name": "cf_clearance", "value": self.CLEARANCE, "domain": "." + host},
+                        {"name": "_ga", "value": "x", "domain": ".google.com"}]}}
 
     def user_of(self, headers):
         for part in (headers.get("Cookie") or "").split(";"):

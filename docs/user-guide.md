@@ -98,6 +98,15 @@ Sync: every blocked request can keep the block going. Lower Page reads a minute 
 
 When a limit is reached it stops cleanly and carries on by itself when there's room again.
 
+**FlareSolverr** (optional): if browser checks keep interrupting your syncs, run
+[FlareSolverr](https://github.com/FlareSolverr/FlareSolverr) next to the app (the
+`ghcr.io/flaresolverr/flaresolverr` container, port 8191 - the compose files have it ready to
+uncomment) and enter its address in Settings → **FlareSolverr address**, e.g. `http://flaresolverr:8191`;
+**Test** checks it's reachable. Nothing changes until a page gets the check: then FlareSolverr opens
+that page in a real browser, and the app carries on with the cookie it got - usually one FlareSolverr
+request covers the following pages too. If it can't help, the sync waits as described above. Your
+page limits still apply.
+
 ### A khinsider account (optional)
 
 khinsider lets paid accounts download whole albums at once. In Settings → **khinsider account**,
@@ -190,7 +199,7 @@ same folder is left alone.
   read from that network right now. Nothing is marked failed; try again later. Servers in a data
   center (a rented cloud server) get this all the time; a home server normally doesn't.
 - If khinsider ever starts refusing Khinsider Sync, check that **Look like Chrome** is on in Settings
-  (it is by default).
+  (it is by default), and consider setting up **FlareSolverr** (section 5).
 - Be gentle with khinsider: keep parallel downloads at the default, and don't tick everything.
 - A password for the page: set `KHINSIDER_PASSWORD` in Docker, or `start.bat --password …`.
 - The ☰ menu also has **Read ticked album pages** (sizes without downloading), **Restart** and

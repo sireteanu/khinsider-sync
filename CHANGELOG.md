@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.0.31] - 2026-10-28
+
+### New
+- **FlareSolverr** (Settings → FlareSolverr address, optional): when a khinsider page answers with
+  Cloudflare's "Just a moment..." check, the app asks your FlareSolverr server for that page and
+  carries on with the cookie it gets - usually one request covers the following pages too, also in
+  later jobs. If its cookie doesn't help, checked pages come from FlareSolverr's own copy. If it can't
+  help, the sync waits for the check as before. Off until an address is set; **Test** checks it's
+  reachable. Docker: `FLARESOLVERR_URL`, and a ready-to-uncomment `flaresolverr` service in both
+  compose files. File downloads never go through it, and the page limits still apply.
+
 ## [1.0.30] - 2026-10-28
 
 ### New

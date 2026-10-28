@@ -306,6 +306,10 @@ def create_app(engine_factory, password: Optional[str] = None, on_restart=None, 
     async def account_check():
         return await eng().check_account()
 
+    @app.post("/api/flaresolverr/check")
+    async def flaresolverr_check():
+        return await eng().check_flaresolverr()
+
     @app.post("/api/album/read")
     async def album_read(slug: str = Body(..., embed=True)):
         e = eng()

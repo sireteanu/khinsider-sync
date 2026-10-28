@@ -16,7 +16,7 @@ from urllib.robotparser import RobotFileParser
 
 import httpx
 
-from .core import browser
+from .core import browser, solver
 from .core.config import Config
 from .core.constants import RETRY_STATUSES
 from .core.download import DONE_WORD, Downloader, ResolveError, run_item
@@ -202,6 +202,7 @@ class Engine:
         os.makedirs(config_dir, exist_ok=True)
         self.config_dir = config_dir
         self.base = base_url if base_url.endswith("/") else base_url + "/"
+        self.solve_state = solver.SolveState()   # FlareSolverr's cookie + User-Agent, kept between jobs
         self.catalog = Catalog(os.path.join(config_dir, "catalog.db"))
         self.data_locked = data_locked
         s = self.catalog.settings()
@@ -423,6 +424,8 @@ class Engine:
             if k == "notify_on":
                 from .notify import EVENTS
                 v = [e for e in EVENTS if e in (v or [])]
+            if k == "flaresolverr_url":
+                v = solver.normalize_url(str(v or ""))    # raises ValueError for nonsense
             if k == "track_names" and v not in ("site", "numbered"):
                 raise ValueError("track names must be site or numbered")
             if k == "file_mode":
@@ -462,6 +465,8 @@ class Engine:
             clean["account_status"] = {}
         moving = [k for k in ("folder_layout", "track_names", "art_folder") if k in clean and clean[k] != s.get(k)]
         self.catalog.save_settings(clean)
+        if "flaresolverr_url" in clean and clean["flaresolverr_url"] != s.get("flaresolverr_url"):
+            self.solve_state.clear()             # another FlareSolverr (or none): its cookie goes too
         if "pages_per_minute" in clean and clean["pages_per_minute"] != s.get("pages_per_minute"):
             self.page_rate.set(float(clean["pages_per_minute"] or 0))   # a sync under way speeds up / slows down now
             if self.busy:
@@ -515,19 +520,31 @@ class Engine:
             self.downloader.stop_requested = True
         log.info("Stopping...")
 
-    def _client(self) -> httpx.AsyncClient:
+    def flaresolverr_url(self) -> str:
+        """The FlareSolverr address from Settings, else the FLARESOLVERR_URL environment variable ("" = off)."""
+        url = self.catalog.settings().get("flaresolverr_url") or os.environ.get("FLARESOLVERR_URL", "")
+        try:
+            return solver.normalize_url(url)
+        except ValueError:
+            return ""
+
+    def _client(self, flaresolverr: bool = True) -> httpx.AsyncClient:
         n = self.scan_workers + int(self.catalog.settings().get("parallel_max") or 8) * 2 + 4
         transport = browser.make_transport(bool(self.catalog.settings().get("impersonate", True)), n)
+        limits = httpx.Limits(max_connections=n, max_keepalive_connections=n)
+        url = self.flaresolverr_url() if flaresolverr else ""
+        host = urlsplit(self.base).hostname or ""
         if transport is not None:
             # Chrome's own User-Agent and headers go out (curl_cffi); only the Referer is ours
-            return httpx.AsyncClient(transport=transport, follow_redirects=True, max_redirects=8,
+            return httpx.AsyncClient(transport=solver.wrap(transport, url, host, self.solve_state),
+                                     follow_redirects=True, max_redirects=8,
                                      timeout=httpx.Timeout(20.0, connect=10.0), headers={"Referer": self.base})
         # HTTP/1.1 like a plain browser request: Cloudflare singles out HTTP/2 from clients that aren't
         # browsers (seen by the ghost-dl downloader)
         return httpx.AsyncClient(http2=False, follow_redirects=True, max_redirects=8,
+                                 transport=solver.wrap(None, url, host, self.solve_state, http2=False, limits=limits),
                                  timeout=httpx.Timeout(20.0, connect=10.0),
-                                 limits=httpx.Limits(max_connections=n, max_keepalive_connections=n),
-                                 headers=browser_headers(self.base))
+                                 limits=limits, headers=browser_headers(self.base))
 
     async def _robots(self, client=None) -> Optional[RobotFileParser]:
         """khinsider's robots.txt - kept for a day, and fetched in a session of its own: a session
@@ -541,7 +558,7 @@ class Engine:
         p = urlsplit(self.base)
         rp = None
         try:
-            async with self._client() as own:
+            async with self._client(flaresolverr=False) as own:
                 r = await own.get(f"{p.scheme}://{p.netloc}/robots.txt", timeout=10)
             # khinsider serves robots.txt as text/html: judge by the content, not the type
             if r.status_code == 200 and not r.text.lstrip().startswith("<"):
@@ -1402,6 +1419,14 @@ class Engine:
         s = self.catalog.settings()
         return dict(s.get("account_status") or {}, configured=account_mod.configured(s),
                     user=(s.get("account_user") or "").strip())
+
+    async def check_flaresolverr(self) -> dict:
+        """Is the FlareSolverr from Settings there? (the Test button) -> {ok, version, message, url}"""
+        url = self.flaresolverr_url()
+        if not url:
+            return {"ok": False, "version": "", "message": "no FlareSolverr address set", "url": ""}
+        res = await solver.FlareSolverr(url).health()
+        return dict(res, url=url, solves=self.solve_state.solves, pages=self.solve_state.pages)
 
     async def read_album_now(self, slug: str) -> dict:
         """Read one album's page right away (opening an album in the page), outside the job queue."""

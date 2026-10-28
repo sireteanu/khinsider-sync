@@ -40,6 +40,8 @@ DEFAULT_SETTINGS = {
     "replace_formats": False,       # once a ticked album is downloaded in the formats now wanted, delete its
                                     # music files of formats no longer wanted (Engine._finish_upgrades)
     "impersonate": True,            # requests look like Chrome (needs curl_cffi)
+    "flaresolverr_url": "",         # FlareSolverr (http://host:8191) asked when a page gets Cloudflare's check;
+                                    # "" = off (or the FLARESOLVERR_URL environment variable) - core/solver.py
     "parallel": "auto",             # auto | number
     "parallel_max": 8,
     "max_rate": "",                 # "" = unlimited, e.g. "5M"

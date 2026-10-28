@@ -341,6 +341,14 @@
       </div></fieldset>
     <label class="check"><input type="checkbox" name="resume_interrupted"> Continue an unfinished sync when the app starts again (after a restart, crash or reboot)</label>
     <label class="check"><input type="checkbox" name="impersonate"> Look like Chrome to khinsider (its Cloudflare protection can turn other programs away)</label>
+    <label class="field"><span>FlareSolverr address (optional)</span>
+      <div class="row-inline"><input name="flaresolverr_url" placeholder="http://host:8191" spellcheck="false" style="max-width:360px">
+        <button type="button" class="btn small" id="flaresolverr-check">Test</button>
+        <span id="flaresolverr-state" class="muted small"></span></div>
+      <small>Only used when a khinsider page answers with Cloudflare's "Just a moment..." check: FlareSolverr opens that
+        page in a real browser and the app carries on with the cookie it gets. Without it (empty, or it can't help)
+        a sync waits for the check to pass, as before. Run it next to the app, e.g. the
+        <i>ghcr.io/flaresolverr/flaresolverr</i> container on port 8191.</small></label>
     <fieldset class="field limits-box"><legend>khinsider account (optional)</legend>
       <div class="row2">
         <label class="field"><span>Username or email</span><input name="account_user" autocomplete="off" spellcheck="false"></label>
