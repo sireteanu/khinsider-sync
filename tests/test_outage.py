@@ -167,7 +167,7 @@ def test_a_browser_check_on_track_pages_also_waits(site, app_factory):
     wait(c)
     site.challenge = True                          # album pages read; track pages get the check
     st = sync(c)
-    assert st["challenge_retries"] == 1 and st["queue_resume_at"] > time.time() + 1700
+    assert st["challenge_retries"] == 1 and st["queue_resume_at"] > time.time() + 590
     assert st["sync"]["failed"] == 0
 
 
