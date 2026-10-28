@@ -128,7 +128,7 @@ def test_robots_txt_is_not_asked_for_in_front_of_page_requests(site, app_factory
 
 
 def test_a_browser_check_waits_and_tries_again_by_itself(site, app_factory):
-    """A browser check pauses the sync and it tries again by itself: 10 min, then 20, 40, 80 ... up
+    """A browser check pauses the sync and it tries again by itself: 1 min, then 10, 20, 40, 80 ... up
     to 2 h while it keeps happening; once pages come through again, back to the start."""
     c = app_factory(site, settings={"album_art": False})
     eng = c.app.state.engine
@@ -137,9 +137,9 @@ def test_a_browser_check_waits_and_tries_again_by_itself(site, app_factory):
     site.challenge = True
     t0 = time.time()
     st = sync(c)                                   # the album page gets the check
-    assert 590 < st["queue_resume_at"] - t0 < 610 and st["challenge_retries"] == 1
+    assert 55 < st["queue_resume_at"] - t0 < 65 and st["challenge_retries"] == 1
     assert "trying again at" in st["job"]["message"]
-    assert any("Paused for 10 minutes because of khinsider's browser check" in m for m in log_lines(st))
+    assert any("Paused for 1 minute because of khinsider's browser check" in m for m in log_lines(st))
     assert not eng.resume_queue(), "not before its time"
     waits = []
     for _ in range(5):                             # still checked: the wait doubles, up to 2 hours
@@ -147,7 +147,7 @@ def test_a_browser_check_waits_and_tries_again_by_itself(site, app_factory):
         assert c.portal.call(eng.resume_queue)
         st = wait(c)
         waits.append(round((st["queue_resume_at"] - time.time()) / 600))
-    assert waits == [2, 4, 8, 12, 12], waits
+    assert waits == [1, 2, 4, 8, 12], waits
     assert any("Trying again after khinsider's browser check" in m for m in log_lines(st))
     site.challenge = False                         # through again: downloads, and the count starts over
     eng.catalog.save_settings({"queue_resume_at": time.time() - 1})
@@ -167,7 +167,7 @@ def test_a_browser_check_on_track_pages_also_waits(site, app_factory):
     wait(c)
     site.challenge = True                          # album pages read; track pages get the check
     st = sync(c)
-    assert st["challenge_retries"] == 1 and st["queue_resume_at"] > time.time() + 590
+    assert st["challenge_retries"] == 1 and st["queue_resume_at"] > time.time() + 55
     assert st["sync"]["failed"] == 0
 
 

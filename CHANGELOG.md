@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.24] - 2026-10-28
+
+### Changed
+- After a browser check the sync tries again after **1 minute** first (then 10, 20, 40, 80 minutes, at
+  most 2 hours). Often only one page gets the check and the next goes through - opening an album by
+  hand 18 seconds after the sync stopped worked.
+
 ## [1.0.23] - 2026-10-28
 
 ### Changed

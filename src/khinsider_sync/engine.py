@@ -1428,10 +1428,10 @@ class Engine:
 
     def _challenge_backoff(self) -> None:
         """khinsider's Cloudflare asked for a browser check: no more requests for a while, then the
-        sync tries again by itself - 30 min, 1 h, 2 h ... up to 8 h while it keeps happening. Never
-        anything to get around the check: waiting is all it does."""
+        sync tries again by itself - 1 min, then 10, 20, 40 ... up to 2 h while it keeps happening.
+        Never anything to get around the check: waiting is all it does."""
         n = int(self.catalog.settings().get("challenge_retries") or 0)
-        wait = min(CHALLENGE_WAIT * 2 ** n, CHALLENGE_WAIT_MAX)
+        wait = CHALLENGE_FIRST if n == 0 else min(CHALLENGE_WAIT * 2 ** (n - 1), CHALLENGE_WAIT_MAX)
         at = time.time() + wait
         self.catalog.save_settings({"queue_resume_at": at, "challenge_retries": n + 1})
         self.job["message"] = "khinsider asks for a browser check - trying again at " + time.strftime("%H:%M", time.localtime(at))
@@ -1545,14 +1545,17 @@ class Engine:
         return out
 
 
-# waits after a browser check: 10 min, doubling while it keeps happening, at most 2 h. The owner's log
-# (October 2026): a check after a burst of album pages was gone 11 minutes later; after a heavy night
-# it lasted hours - 2 h between tries costs one page request each and doesn't sleep through the morning
+# waits after a browser check: 1 min, then 10 min doubling while it keeps happening, at most 2 h. The
+# owner's log (October 2026): mostly a single page gets the check - opening an album 18 s later worked;
+# after a heavy night it lasted hours - 2 h between tries costs one page request each
+CHALLENGE_FIRST = 60
 CHALLENGE_WAIT = 600
 CHALLENGE_WAIT_MAX = 2 * 3600
 
 
 def _span(secs: float) -> str:
+    if secs < 120:
+        return f"{secs / 60:g} minute"
     return f"{secs / 3600:g} hours" if secs >= 3600 * 2 else f"{secs / 3600:g} hour" if secs >= 3600 else f"{secs / 60:g} minutes"
 
 
