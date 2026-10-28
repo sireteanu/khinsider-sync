@@ -827,3 +827,36 @@ def test_a_title_ending_in_its_extension_isnt_named_twice(site, app_factory, mon
     assert "Super Mario World/02 - Title Screen.mp3.mp3" not in files
     assert not site.file_requests(), "renamed, not downloaded again"
     assert st["sync"]["failed"] == 0
+
+
+def test_tagged_files_are_moved_not_downloaded_again(site, app_factory):
+    """A file this app put a cover or tags into is bigger than the album page says. When its place
+    changes (track names, layout, Saved as - or the 1.0.32 rename), the next sync must move it, not
+    take the size difference for a change on the site and download it again."""
+    c = app_factory(site, settings={"embed_cover": True, "write_tags": True})
+    first_sync(c)
+    album_dir = c.data / "Super Mario World"
+    cover = (album_dir / "Cover.jpg").read_bytes()
+    c.post("/api/settings", json={"track_names": "numbered"})
+    site.reset_log()
+    st = sync(c)
+    assert not site.file_requests(), "moved, not downloaded again"
+    assert st["sync"]["updated"] == 0 and st["sync"]["failed"] == 0
+    assert pictures(album_dir / "01 - Nintendo Logo.mp3") == [cover], "the cover is still in it"
+    assert "Super Mario World/01. Nintendo Logo.mp3" not in on_disk(c.data)
+
+
+def test_a_cover_that_cant_be_loaded_is_tried_again_a_day_later(site, app_factory, monkeypatch):
+    from khinsider_sync import engine as eng_mod
+    site.broken_images.add("Cover.jpg")
+    c = app_factory(site, settings={"embed_cover": True})
+    st = first_sync(c)
+    before = sum("waiting for their cover" in m for m in log_lines(st))
+    assert before == 1
+    st = sync(c)
+    assert sum("waiting for their cover" in m for m in log_lines(st)) == before, "not again every sync"
+    monkeypatch.setattr(eng_mod, "COVER_RETRY", 0)                  # a day later
+    site.broken_images.discard("Cover.jpg")
+    st = sync(c)
+    cover = (c.data / "Super Mario World" / "Cover.jpg").read_bytes()
+    assert pictures(c.data / "Super Mario World" / "01. Nintendo Logo.mp3") == [cover]

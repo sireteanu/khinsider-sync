@@ -256,13 +256,15 @@ doesn't change albums). For every file of the other ticked albums (formats as ab
   file servers, which didn't ask for the check in October 2026.
 - **FlareSolverr** (optional, Settings → FlareSolverr address, or `FLARESOLVERR_URL`): when a page gets
   the check, the app asks a [FlareSolverr](https://github.com/FlareSolverr/FlareSolverr) server for that
-  page (one request at a time; GET pages only - never files or the sign-in), handing it the app's own khinsider cookies so account pages come back signed in. Its `cf_clearance` cookie
-  goes into the client's one cookie store and its User-Agent goes out with every later khinsider
-  request, the page is asked for again directly, and the following pages normally go through with it.
-  The cookie is kept between jobs. If direct requests still get the check, every checked page comes from
-  FlareSolverr's own copy (slower) until a direct one goes through again. If FlareSolverr can't help
-  (not reachable, an error), nothing is tried again for a minute and the usual waiting above takes
-  over. The page limits ("Go easy on khinsider") still apply. **Test** in Settings checks it's reachable.
+  page (one request at a time; GET pages only - never files or the sign-in), handing it the app's own
+  khinsider cookies so account pages come back signed in. FlareSolverr's copy is used as the page - it
+  is never asked for a second time, as some account pages change something (adding an album to the
+  list, taking it off). Cloudflare's own cookies it got (`cf_clearance`) go into the client's one
+  cookie store, with FlareSolverr's User-Agent, so the next pages can go direct again; its copies of
+  other cookies (your account session) are ignored. The cookie is kept between jobs. If FlareSolverr
+  can't help (not reachable, an error), nothing is tried again for a minute and the usual waiting above
+  takes over. The page limits ("Go easy on khinsider") still apply. **Test** in Settings checks it's
+  reachable.
 - **Download limit**: when the site keeps answering with an HTML page instead of files while nothing
   else gets through, downloads pause ("Paused: …") and stay queued for the next sync.
 - **Free space**: downloads pause before the disk would drop below "Keep free on disk".

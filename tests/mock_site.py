@@ -692,7 +692,10 @@ class MockSite:
         return {"status": "ok", "message": "Challenge solved!", "solution": {
             "url": final, "status": status, "headers": {}, "response": html, "userAgent": self.SOLVER_UA,
             "cookies": [{"name": "cf_clearance", "value": self.CLEARANCE, "domain": "." + host},
-                        {"name": "_ga", "value": "x", "domain": ".google.com"}]}}
+                        {"name": "_ga", "value": "x", "domain": ".google.com"},
+                        # the real FlareSolverr hands back every cookie of the page, the session too:
+                        # the app must keep its own (a stale copy here signs it out)
+                        {"name": "xf_user", "value": "stale-copy", "domain": host}]}}
 
     def user_of(self, headers):
         for part in (headers.get("Cookie") or "").split(";"):

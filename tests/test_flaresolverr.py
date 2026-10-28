@@ -67,7 +67,10 @@ def test_when_its_cookie_doesnt_help_pages_come_from_flaresolverr(site, app_fact
     assert st["job"]["phase"] == "done", st["job"]
     assert c.get("/api/albums").json()["total"] == 7
     assert len(site.solver_calls) > 1
-    assert any("come from FlareSolverr itself" in m for m in log_lines(st))
+    direct = [p for p, h in site.requests if "X-Mock-Browser" not in h]
+    for url in site.solver_calls:
+        path = url.split(site.url, 1)[1]
+        assert direct.count(path) == 1, f"{path}: FlareSolverr's copy is the answer, never a second request"
     c.post("/api/album/read", json={"slug": BIRD})
     assert album(c, BIRD)["files"], "album pages read from its copy too"
 

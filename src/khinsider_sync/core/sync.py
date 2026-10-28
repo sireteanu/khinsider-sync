@@ -290,7 +290,10 @@ def plan(dest: str, rec: Optional[Record], info: FileInfo, *,
             return UPDATE, f"changed on the site ({rec.page_date} -> {info.date})"
         if info.size and rec.page_size and info.size != rec.page_size:
             return UPDATE, f"size changed on the site ({rec.page_size} -> {info.size})"
-        if info.size and size_matches(size, info.size) is False:
+        if info.size and not rec.page_size and size_matches(size, info.size) is False:
+            # only without a recorded page size: with one, the file is exactly what was saved (its
+            # size is checked above, including this app's own cover/tag changes - Manifest.resized),
+            # and a change on the site shows as a different page size
             return UPDATE, f"size on the site is {info.size}"
         if not info.date and not info.size and (rec.last_modified or rec.etag):
             return CHECK, "asking the server whether it changed"

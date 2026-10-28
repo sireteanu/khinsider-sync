@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.0.33] - 2026-10-28
+
+### Fixed
+- **Files with a cover or tags put in by the app were downloaded again** when their place changed
+  (track names, folder layout, Saved as - and the 1.0.32 rename of "….mp3.mp3" files): they are
+  bigger than the album page says, which was taken for a change on the site. Now they're moved.
+- **FlareSolverr**: its copy of a page is the answer - the page isn't asked for a second time (an
+  account page such as taking an album off your list ran twice). Only Cloudflare's own cookies are
+  taken from it, so its copy of your account session can't replace the app's. Its User-Agent is only
+  used together with such a cookie. Less log noise: one line per page it fetches.
+
+### Improved
+- An album whose cover can't be loaded is tried again a day later, not at the end of every sync.
+
 ## [1.0.32] - 2026-10-28
 
 ### Fixed

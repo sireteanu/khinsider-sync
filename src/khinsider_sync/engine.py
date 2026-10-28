@@ -97,6 +97,7 @@ def track_name(f: dict) -> str:
     return safe_segment(f"{number} - {title}{f['ext']}")
 
 
+COVER_RETRY = 86400      # an album whose cover couldn't be loaded: the next try a day later
 READ_BATCH = 1           # default of albums_per_batch: album pages a sync reads before downloading them
 
 
@@ -206,6 +207,7 @@ class Engine:
         self.config_dir = config_dir
         self.base = base_url if base_url.endswith("/") else base_url + "/"
         self.solve_state = solver.SolveState()   # FlareSolverr's cookie + User-Agent, kept between jobs
+        self._cover_failed: dict = {}            # album slug -> when its cover couldn't be loaded (retry daily)
         self.catalog = Catalog(os.path.join(config_dir, "catalog.db"))
         self.data_locked = data_locked
         s = self.catalog.settings()
@@ -1319,10 +1321,18 @@ class Engine:
                 a = albums.get(slug) or {}
                 cover = None
                 if want_cover and any(f["cover"] is None for f in files):
-                    cover = await self._cover_bytes(client, firsts.get(slug), root)
-                    if cover is None:
-                        counts["in albums without images" if not firsts.get(slug)
-                               else "waiting for their cover (couldn't load it)"] += len(files)
+                    if time.time() - self._cover_failed.get(slug, 0) < COVER_RETRY:
+                        if not want_tags or all(f["tags"] is not None for f in files):
+                            continue                 # tried not long ago: once a day, not every sync
+                    else:
+                        cover = await self._cover_bytes(client, firsts.get(slug), root)
+                        if cover is None and firsts.get(slug):
+                            self._cover_failed[slug] = time.time()
+                        elif cover is not None:
+                            self._cover_failed.pop(slug, None)
+                        if cover is None:
+                            counts["in albums without images" if not firsts.get(slug)
+                                   else "waiting for their cover (couldn't load it - tried again in a day)"] += len(files)
                 layout = self.catalog.track_layout(slug) if want_tags else {}
                 discs = sorted({d for (_e, d) in layout if d})
 

@@ -8,14 +8,16 @@ for Cloudflare's "Just a moment..." check to pass and answers with the page, the
 `SolverTransport` wraps the app's transport (ChromeTransport or plain httpx). Nothing changes until a
 khinsider page answers with the check (`util.is_challenge`). Then, for GET requests only:
 
-1. FlareSolverr is asked for that page (one at a time; at most one attempt per `cooldown`).
-2. Its cookies go into the client's ONE cookie store (curl's session with ChromeTransport - never a
-   second Cookie header, see browser.py) and its User-Agent is sent on every later khinsider request
+1. FlareSolverr is asked for that page (one at a time; after a failure, no attempt for `cooldown`),
+   with the client's own khinsider cookies (a signed-in account's session) so it gets the same page.
+2. Its copy of the page is the answer. The page is never asked for twice: some account pages
+   change something (/cp/add_album, /cp/downloads_delete_album).
+3. Cloudflare's cookies it got (`cf_clearance`, ...; nothing else - never its copy of the session) go
+   into the client's ONE cookie store (curl's session with ChromeTransport - never a second Cookie
+   header, see browser.py) and its User-Agent is sent on every later khinsider request
    (`cf_clearance` only works together with the User-Agent it was issued for).
-3. The page is asked for again directly. That normally goes through, and so do the next pages.
-4. If the direct request still gets the check, FlareSolverr's copy of the page is used instead, and
-   from then on every page that gets the check comes from FlareSolverr (one at a time, still paced
-   by the job's page limits) until a direct request goes through again.
+4. Later requests go direct again. A request that was under way while FlareSolverr got a new cookie
+   is tried once more directly before asking FlareSolverr.
 
 When FlareSolverr can't help (not reachable, an error, cooldown), the check is returned unchanged and
 the app's usual waiting (`Engine._challenge_backoff`) takes over. File downloads (vgmtreasurechest)
@@ -102,14 +104,13 @@ class SolveState:
         self.user_agent = ""
         self.solved_at = 0.0
         self.failed_at = 0.0        # FlareSolverr's last failure (no new attempt for `cooldown`)
-        self.html_only = False      # its cookie didn't help direct requests: use its copies of pages
         self.solves = 0
         self.pages = 0              # pages FlareSolverr's own copy was used for
         self.lock = asyncio.Lock()
 
     def clear(self) -> None:
         self.cookies, self.user_agent, self.solved_at = {}, "", 0.0
-        self.failed_at, self.html_only = 0.0, False
+        self.failed_at = 0.0
 
 
 class SolverTransport(httpx.AsyncBaseTransport):
@@ -153,7 +154,7 @@ class SolverTransport(httpx.AsyncBaseTransport):
         """The request with FlareSolverr's User-Agent (and, without curl, its cookies merged into the
         request's own single Cookie header)."""
         st = self.state
-        if request.url.host != self.host or not st.solved_at:
+        if request.url.host != self.host or not st.cookies:
             return request
         self._sync_jar()
         headers = httpx.Headers(request.headers)
@@ -174,39 +175,26 @@ class SolverTransport(httpx.AsyncBaseTransport):
         sent = time.time()
         st = self.state
         r = await self.inner.handle_async_request(self._prepare(request))
-        if request.method != "GET" or request.url.host != self.host:
-            return r
-        if not is_challenge(r.status_code, r.headers):
-            st.html_only = False                           # direct requests go through (again)
+        if (request.method != "GET" or request.url.host != self.host
+                or not is_challenge(r.status_code, r.headers)):
             return r
         await r.aread()
         challenge = httpx.Response(r.status_code, headers=r.headers, content=r.content, request=request)
         await r.aclose()
+        if st.solved_at > sent:
+            # FlareSolverr got a fresh cookie while this request was on its way: one more direct try
+            r = await self.inner.handle_async_request(self._prepare(request))
+            if not is_challenge(r.status_code, r.headers):
+                return r
+            await r.aclose()
         async with st.lock:                                # one FlareSolverr request at a time
-            if st.html_only:
-                # its cookie didn't help direct requests: every checked page comes from FlareSolverr
-                sol = await self._solve(request)
-                if not sol:
-                    return challenge
-                self._take(sol)
-                return self._page(sol, request) or challenge
-            if st.solved_at <= sent:                       # nobody solved it while we waited
-                sol = await self._solve(request)
-                if not sol:
-                    return challenge
-                self._take(sol)
-            else:
-                sol = None
-        # again, directly, with FlareSolverr's cookie and User-Agent
-        r = await self.inner.handle_async_request(self._prepare(request))
-        if not is_challenge(r.status_code, r.headers):
-            return r
-        await r.aclose()
-        if sol is None:
+            sol = await self._solve(request)
+        if not sol:
             return challenge
-        st.html_only = True
-        log.warning("FlareSolverr's cookie doesn't get direct requests past the check - checked pages "
-                    "now come from FlareSolverr itself (slower)")
+        self._take(sol)
+        # FlareSolverr's copy is the answer - the page is never asked for twice (some account pages
+        # change things: /cp/add_album, /cp/downloads_delete_album). Its cookie and User-Agent go
+        # with the next requests, which go direct again.
         return self._page(sol, request) or challenge
 
     async def _solve(self, request: httpx.Request) -> Optional[dict]:
@@ -224,16 +212,22 @@ class SolverTransport(httpx.AsyncBaseTransport):
         cookies = {}
         for c in sol.get("cookies") or []:
             d = str(c.get("domain") or "").lstrip(".")
-            if c.get("name") and (not d or self.host == d or self.host.endswith("." + d)):
-                cookies[str(c["name"])] = str(c.get("value") or "")
-        st.cookies = cookies
-        st.user_agent = str(sol.get("userAgent") or st.user_agent)
-        st.solved_at = time.time()
+            name = str(c.get("name") or "")
+            # only Cloudflare's own cookies: the rest (the account session, analytics) are the client's
+            # own or of no use - taking FlareSolverr's copies could replace a newer session
+            if name.startswith(("cf_", "__cf")) and (not d or self.host == d or self.host.endswith("." + d)):
+                cookies[name] = str(c.get("value") or "")
+        ua = str(sol.get("userAgent") or st.user_agent)
+        # its User-Agent only matters together with a Cloudflare cookie issued for it; without one,
+        # the client keeps its own (Chrome's, matching curl's fingerprint)
+        if cookies and (cookies != st.cookies or ua != st.user_agent):
+            st.cookies, st.user_agent = cookies, ua
+            st.solved_at = time.time()
         st.solves += 1
-        log.info("FlareSolverr got past the check (%s)", ", ".join(sorted(cookies)) or "no cookies")
+        log.debug("FlareSolverr got past the check (%s)", ", ".join(sorted(cookies)) or "no Cloudflare cookie")
 
     def _page(self, sol: dict, request: httpx.Request) -> Optional[httpx.Response]:
-        """FlareSolverr's own copy of the page as the response (the direct request was still checked)."""
+        """FlareSolverr's own copy of the page as the response."""
         status = int(sol.get("status") or 0)
         html = sol.get("response")
         if not isinstance(html, str) or status != 200:
@@ -243,7 +237,6 @@ class SolverTransport(httpx.AsyncBaseTransport):
             # it followed a redirect (a renamed album): let httpx follow it too
             return httpx.Response(301, headers={"Location": str(final)}, request=request)
         self.state.pages += 1
-        log.info("Using FlareSolverr's copy of %s (direct requests still get the check)", request.url.path)
         return httpx.Response(200, headers={"Content-Type": "text/html; charset=UTF-8",
                                             "X-Khinsider-Sync-Via": "flaresolverr"},
                               content=html.encode("utf-8"), request=request)
