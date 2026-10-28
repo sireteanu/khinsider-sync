@@ -76,9 +76,11 @@ tests/  conftest (app_factory + API helpers), mock_site, fixtures/ (real markup 
 - Cloudflare guards the pages: data-center addresses (this cloud workspace) get the "Just a moment..."
   browser check (403, `cf-mitigated: challenge`) for every page whatever the fingerprint; the file
   servers still answer. `util.is_challenge` -> `ChallengeError` stops scans, `ResolveError(pause=...)`
-  pauses syncs; nothing is marked failed. Then the sync only waits (`Engine._challenge_backoff`: 30 min
-  doubling to 8 h, `challenge_retries`, `queue_resume_at`). Never try to solve or get around the check.
-  An hour at 60 page reads a minute got the owner's home connection checked for every page.
+  pauses syncs; nothing is marked failed. Then the sync only waits (`Engine._challenge_backoff`: 10 min
+  doubling to 2 h, `challenge_retries`, `queue_resume_at`). Never try to solve or get around the check.
+  An hour at 60 page reads a minute got the owner's home connection checked for every page. The check
+  is per connection and time-based, not per request path: a sync's album page and "open album" are the
+  same request; after a burst (5 album pages in 30 s at 15 a minute) it went within ~11 minutes.
   robots.txt comes as text/html.
 - Sizes are shown in MB with two decimals ("5.64 MB"); totals use thousands commas ("1,438 MB").
   No per-file dates: files get the album's Date Added (12:00 local time).

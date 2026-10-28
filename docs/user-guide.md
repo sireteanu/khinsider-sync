@@ -84,8 +84,10 @@ reads pages too fast - then nothing can be read for a while. In Settings → **G
   those albums. With 1, it reads one album's page, downloads that album, then reads the next - it
   never asks for a pile of pages in a row. It goes straight on with the next albums in the same sync.
 
-If khinsider asks for a browser check anyway, the sync pauses and tries again by itself after 30
-minutes - then 1 hour, 2, 4 and at most 8 hours while the check keeps coming. Don't keep clicking
+If khinsider asks for a browser check anyway, the sync pauses and tries again by itself after 10
+minutes - then 20, 40, 80 and at most 2 hours between tries while the check keeps coming. The check
+usually goes after a few minutes of quiet - which is why opening an album by hand a while later
+works - but after hours of heavy use it can last hours. Don't keep clicking
 Sync: every blocked request can keep the block going. Lower Page reads a minute afterwards.
 
 When a limit is reached it stops cleanly and carries on by itself when there's room again.

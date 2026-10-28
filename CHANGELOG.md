@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.23] - 2026-10-28
+
+### Changed
+- After a Cloudflare browser check the sync tries again sooner: after 10 minutes, then 20, 40, 80 and
+  at most 2 hours between tries (was 30 minutes doubling up to 8 hours). A check after a short burst
+  is usually gone within minutes - that's why opening an album by hand worked while the sync was
+  still waiting hours to try again.
+
 ## [1.0.22] - 2026-10-28
 
 ### New

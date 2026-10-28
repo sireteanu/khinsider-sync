@@ -1545,8 +1545,11 @@ class Engine:
         return out
 
 
-CHALLENGE_WAIT = 1800          # first wait after a browser check (s); doubles while it keeps happening
-CHALLENGE_WAIT_MAX = 8 * 3600
+# waits after a browser check: 10 min, doubling while it keeps happening, at most 2 h. The owner's log
+# (October 2026): a check after a burst of album pages was gone 11 minutes later; after a heavy night
+# it lasted hours - 2 h between tries costs one page request each and doesn't sleep through the morning
+CHALLENGE_WAIT = 600
+CHALLENGE_WAIT_MAX = 2 * 3600
 
 
 def _span(secs: float) -> str:

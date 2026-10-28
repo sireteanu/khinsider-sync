@@ -128,8 +128,8 @@ def test_robots_txt_is_not_asked_for_in_front_of_page_requests(site, app_factory
 
 
 def test_a_browser_check_waits_and_tries_again_by_itself(site, app_factory):
-    """A browser check pauses the sync and it tries again by itself: 30 min, then 1 h, 2 h ... up
-    to 8 h while it keeps happening; once pages come through again, back to the start."""
+    """A browser check pauses the sync and it tries again by itself: 10 min, then 20, 40, 80 ... up
+    to 2 h while it keeps happening; once pages come through again, back to the start."""
     c = app_factory(site, settings={"album_art": False})
     eng = c.app.state.engine
     scan(c)
@@ -137,17 +137,17 @@ def test_a_browser_check_waits_and_tries_again_by_itself(site, app_factory):
     site.challenge = True
     t0 = time.time()
     st = sync(c)                                   # the album page gets the check
-    assert 1790 < st["queue_resume_at"] - t0 < 1810 and st["challenge_retries"] == 1
+    assert 590 < st["queue_resume_at"] - t0 < 610 and st["challenge_retries"] == 1
     assert "trying again at" in st["job"]["message"]
-    assert any("Paused for 30 minutes because of khinsider's browser check" in m for m in log_lines(st))
+    assert any("Paused for 10 minutes because of khinsider's browser check" in m for m in log_lines(st))
     assert not eng.resume_queue(), "not before its time"
     waits = []
-    for _ in range(5):                             # still checked: the wait doubles, up to 8 hours
+    for _ in range(5):                             # still checked: the wait doubles, up to 2 hours
         eng.catalog.save_settings({"queue_resume_at": time.time() - 1})
         assert c.portal.call(eng.resume_queue)
         st = wait(c)
-        waits.append(round((st["queue_resume_at"] - time.time()) / 1800))
-    assert waits == [2, 4, 8, 16, 16], waits
+        waits.append(round((st["queue_resume_at"] - time.time()) / 600))
+    assert waits == [2, 4, 8, 12, 12], waits
     assert any("Trying again after khinsider's browser check" in m for m in log_lines(st))
     site.challenge = False                         # through again: downloads, and the count starts over
     eng.catalog.save_settings({"queue_resume_at": time.time() - 1})
