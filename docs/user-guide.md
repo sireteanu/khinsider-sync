@@ -186,6 +186,12 @@ removed from khinsider, in albums you unticked, or formats you no longer sync. C
 what should go, and confirm. Only files Khinsider Sync downloaded are ever listed; other music in the
 same folder is left alone.
 
+**Delete one album**: open a downloaded album and click **Delete album…**. It says how many files
+and how much space, then - once you confirm - deletes what Khinsider Sync saved for that album
+(music, images, its playlist and folder image) and unticks it, so no sync downloads it again (also when
+its whole platform is ticked). Anything else you put in its folder stays. Tick it again any time to get
+it back.
+
 ## 10. Activity log
 
 **Activity log** (top) lists every file added, updated or deleted, by day, for a year.

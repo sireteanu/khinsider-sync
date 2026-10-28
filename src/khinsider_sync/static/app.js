@@ -485,6 +485,7 @@ function showAlbum(d) {
   };
   $("#al-site").href = d.page;
   $("#al-check").hidden = !a.synced;
+  $("#al-delete").hidden = !a.synced;
   const syncBtn = $("#al-sync");
   syncBtn.hidden = !!a.missing || (a.downloaded && !(d.upgrade && d.upgrade.pending));
   syncBtn.disabled = !!(lastStatus && lastStatus.busy);
@@ -601,6 +602,28 @@ $("#al-check").addEventListener("click", async () => {
       : "Every file is still in the download folder.";
     refreshList(); poll(true);
   } catch (e) { alert("Could not check the files: " + e.message); }
+});
+$("#al-delete").addEventListener("click", async () => {
+  if (!current) return;
+  const slug = current;
+  const btn = $("#al-delete");
+  btn.disabled = true;
+  try {
+    const what = await api("/api/album/delete", { method: "POST", body: { slug } });
+    const ok = confirm(`Delete "${what.name}"?\n\n${nFiles(what.files)} (${bytes(what.bytes)}) the app saved for it are `
+      + "deleted from the download folder, and the album is unticked so no sync downloads it again.\n\n"
+      + "Other files in its folder are left alone. This can't be undone.");
+    if (ok) {
+      const r = await api("/api/album/delete", { method: "POST", body: { slug, confirm: true } });
+      await openAlbum(slug, false);
+      $("#al-sub").textContent = `Deleted ${nFiles(r.deleted)} (${bytes(r.bytes)}) and unticked the album.`
+        + (r.errors.length ? ` ${r.errors.length} could not be deleted: ${r.errors.slice(0, 3).join("; ")}` : "");
+      refreshList(); poll(true);
+    }
+  } catch (e) {
+    alert(/409|running job/.test(String(e.message)) ? "Wait until the running job has finished." : "Could not delete the album: " + e.message);
+  }
+  btn.disabled = false;
 });
 $("#al-close").addEventListener("click", () => $("#album-dlg").close());
 $("#al-sync").addEventListener("click", async () => {

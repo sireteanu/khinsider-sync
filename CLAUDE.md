@@ -157,6 +157,9 @@ tests/  conftest (app_factory + API helpers), mock_site, fixtures/ (real markup 
 6. **Clean up** lists only files the download record knows (or the catalog lists): other music in
    the same folder is never listed. "gone" needs the album page read without errors (or the album
    gone after a finished full scan). Nothing is deleted without `confirm: true`; refused while busy.
+   **Delete album** (`Engine.delete_album`, `/api/album/delete`) follows the same rules: only files the
+   download record or catalog says the app saved for that album (+ their `.part`, its extras), then an
+   album rule out (`a:<slug>` exclude) so a ticked platform doesn't bring it back.
 7. A full scan that had failed pages removes nothing (status "incomplete").
 8. **Getting through**: with `impersonate` (default) the client uses `browser.ChromeTransport` and only
    adds `Referer`; otherwise `browser_headers()` (browser-like Accept headers + Referer). Every

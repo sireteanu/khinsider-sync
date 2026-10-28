@@ -1524,6 +1524,61 @@ class Engine:
         await self.find_leftovers()
         return res
 
+    async def delete_album(self, slug: str, confirm: bool = False) -> dict:
+        """Delete an album from the download folder and the queue: it's unticked (an album rule out, so a
+        ticked platform doesn't bring it back) and the files this app saved for it go - its music and
+        images (the download record's or the catalog's), unfinished downloads of them, its playlist and
+        folder image, and the folders left empty. Other files in its folder are never touched.
+        Without `confirm` it only says what would go. -> {slug, files, bytes, deleted, errors}"""
+        from . import cleanup
+        a = self.catalog.album(slug)
+        if a is None:
+            raise KeyError(slug)
+        root = self.data_dir
+        listed = self.catalog.files_of([slug])
+        urls = {r[0] for r in listed}
+        rels = {r[1] for r in self.catalog.saved_files(slug)}
+        if os.path.exists(os.path.join(root, MANIFEST_NAME)):   # the download record, when there is one
+            m = Manifest(root)
+            try:
+                rels |= {path for url, path in m.by_url().items() if url in urls}
+            finally:
+                m.close()
+        extras = [rel for rel, (album, _k, _s) in self.catalog.extras().items() if album == slug]
+
+        def look() -> list:
+            out = []
+            # what it saved (and its unfinished downloads); of files never finished, only the .part
+            paths = rels | set(extras) | {r + ".part" for r in rels} | {r[1] + ".part" for r in listed}
+            for path in sorted(paths):
+                try:
+                    size = os.stat(os.path.join(root, *path.split("/"))).st_size
+                except OSError:
+                    continue
+                out.append({"path": path, "size": size})
+            return out
+        files = await asyncio.to_thread(look)
+        out = {"slug": slug, "name": a["name"], "files": len(files), "bytes": sum(f["size"] for f in files),
+               "deleted": 0, "errors": []}
+        if not confirm:
+            return out
+        res = await asyncio.to_thread(cleanup.delete, root, files)
+        gone = set(res["deleted"])
+        for f in files:
+            if f["path"] in gone and not f["path"].endswith(".part"):
+                self.catalog.add_change(None, "deleted", f["path"], f["size"], "Album deleted")
+        self.catalog.select(ALBUM + slug, False)          # off the queue: not synced again
+        self.catalog.forget_local(urls)
+        self.catalog.drop_extras([r for r in extras if r in gone])
+        self.catalog.commit()
+        self._sel_cache = None
+        self.catalog.changed(albums=True)
+        log.info("Deleted the album %s: %d files (%s) from the download folder; unticked%s", a["name"],
+                 len(gone), fmt_bytes(res["bytes"]),
+                 f" - {len(res['errors'])} could not be deleted: " + "; ".join(res["errors"][:3]) if res["errors"] else "")
+        await self.find_leftovers()
+        return dict(out, deleted=len(gone), bytes=res["bytes"], errors=res["errors"])
+
     # ------------------------------------------------------------------ schedule
     def _schedule_next(self) -> None:
         s = self.catalog.settings()

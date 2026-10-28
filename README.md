@@ -72,6 +72,7 @@ modest, don't sync the whole site, and consider [donating](https://downloads.khi
 | Progress | Activity panel (counts, speed, parallel downloads; click New, Updated, Resumed, Up to date or Failed to see those files), **This sync** box (size, files left, time remaining; called **This run** when more albums follow, with how many follow and how many wait for the day's room), **Downloading** box (one progress bar per file), live log. |
 | Activity log | Every file added, updated, resumed, deleted or failed, by day, kept for a year. |
 | Clean up | Lists files that aren't part of the sync any more (removed from their album, in albums you unticked, formats or images you no longer sync, unneeded `.part` files). Only files Khinsider Sync downloaded or knows are listed - other music in the folder is never touched. Nothing is deleted without confirming. |
+| Delete an album | **Delete album…** in a downloaded album's window: the files Khinsider Sync saved for it (music, images, unfinished downloads, its playlist and folder image) are deleted from the download folder, folders left empty go, and the album is **unticked** - with an album rule, so a ticked platform doesn't bring it back. Other files in its folder are left alone. It says how many files and how much first, and asks to confirm; refused while a job runs. Every deleted file is in the Activity log ("Album deleted"). |
 | Schedule | Optional automatic sync every N hours: a full site scan every N days, otherwise a scan for new albums (one page), then the sync. Optionally a check of the download folder first (never, daily, weekly, monthly - off by default, as it wakes the disks). |
 | Reliability | A sync cut off by a restart, crash or reboot continues at the next start. Menu: **Restart** / **Shut down**. Starting a second copy just opens the running one. |
 | Interface | Dark (default) or light theme, works on a phone, optional password (HTTP Basic), no external resources. |
@@ -395,6 +396,7 @@ All JSON; the page uses nothing else.
 | `POST /api/account/check` | Sign in to khinsider with the saved account now -> `{state, message, user, configured, at}` |
 | `POST /api/album/read` `{slug}` | Read that album's page now -> `{read, files, renamed, slug}` |
 | `POST /api/album/check` `{slug}` | Look on disk for that album's downloaded files; missing ones are downloaded by the next sync -> `{slug, missing}` |
+| `POST /api/album/delete` `{slug, confirm}` | Without `confirm`: what deleting the album would remove -> `{slug, name, files, bytes}`. With `confirm: true`: deletes the files the app saved for it, unticks it -> `{..., deleted, bytes, errors}` (409 while a job runs, 404 for an unknown album) |
 | `POST /api/album/upgrade` `{slug, format}` | Upgrade a downloaded album to a better format it has (`flac`, ...); `format` `""` cancels a waiting upgrade -> `{slug, pending}` (400 for a format that isn't better, 404 for an unknown album) |
 | `POST /api/check` | Job: look on disk for every downloaded file; missing ones are marked not downloaded (409 when busy) |
 | `POST /api/select` `{key, include}` | Tick/untick: `a:<slug>` or `p:<platform>` |

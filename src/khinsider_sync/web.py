@@ -326,6 +326,17 @@ def create_app(engine_factory, password: Optional[str] = None, on_restart=None, 
         except ValueError as exc:
             raise HTTPException(404, str(exc))
 
+    @app.post("/api/album/delete")
+    async def album_delete(slug: str = Body(...), confirm: bool = Body(False)):
+        """Delete an album's files from the download folder and untick it. Without confirm: what would go."""
+        e = eng()
+        if confirm and e.busy:
+            raise HTTPException(409, "wait until the running job has finished")
+        try:
+            return await e.delete_album(slug, confirm)
+        except KeyError:
+            raise HTTPException(404, "no such album")
+
     @app.post("/api/album/upgrade")
     async def album_upgrade(slug: str = Body(...), format: str = Body("")):
         """Replace an album's files with a better format ("" = cancel a waiting upgrade)."""

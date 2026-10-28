@@ -107,3 +107,37 @@ def test_clean_up_reports_how_far_it_has_looked(site, app_factory, monkeypatch):
     assert seen and seen[-1]["files"] == 4 and seen[-1]["expected"] == 4 and seen[-1]["step"] == "judging"
     assert "cleanup" not in c.get("/api/status").json(), "gone once it has finished"
     assert out["r"]["files"] == []
+
+
+def test_delete_an_album_from_the_drive_and_the_queue(site, app_factory):
+    from conftest import BIRD, albums, on_disk, scan, select, sync
+    c = app_factory(site, settings={"folder_art": True})
+    scan(c)
+    select(c, "p:windows")                        # ticked by its platform
+    sync(c)
+    smw_free = [f for f in on_disk(c.data) if f.startswith("A Bird Story/")]
+    assert smw_free and "A Bird Story/folder.jpg" in on_disk(c.data)
+    (c.data / "A Bird Story" / "my notes.txt").write_text("mine")
+    before = on_disk(c.data)
+    preview = c.post("/api/album/delete", json={"slug": BIRD}).json()
+    assert preview["files"] == len(smw_free) and preview["deleted"] == 0
+    assert on_disk(c.data) == before, "nothing deleted without confirm"
+    r = c.post("/api/album/delete", json={"slug": BIRD, "confirm": True}).json()
+    assert r["deleted"] == len(smw_free) and not r["errors"]
+    left = on_disk(c.data)
+    assert [f for f in left if f.startswith("A Bird Story/")] == ["A Bird Story/my notes.txt"], "other files stay"
+    assert any(f.startswith("PERSONA5") for f in left), "other albums untouched"
+    assert BIRD not in albums(c, show="ticked"), "off the queue, although its platform is ticked"
+    site.reset_log()
+    st = sync(c)
+    assert not [p for p in site.file_requests() if "a-bird-story" in p[0]], "unticked: not downloaded again"
+    assert st["sync"]["failed"] == 0
+    assert c.post("/api/album/delete", json={"slug": "no-such-album", "confirm": True}).status_code == 404
+
+
+def test_deleting_an_album_with_nothing_saved_deletes_nothing(site, app_factory):
+    from conftest import SMW, scan
+    c = app_factory(site)
+    scan(c)
+    r = c.post("/api/album/delete", json={"slug": SMW, "confirm": True}).json()
+    assert r["files"] == 0 and r["deleted"] == 0

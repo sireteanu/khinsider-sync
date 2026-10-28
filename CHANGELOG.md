@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.35] - 2026-10-28
+
+### New
+- **Delete album…** in a downloaded album's window: deletes the files the app saved for that album
+  (music, images, unfinished downloads, its playlist and folder image) from the download folder and
+  unticks it, so no sync downloads it again - also when its platform is ticked. It shows how many files
+  and how much space first and asks to confirm; other files in the album's folder are left alone.
+
 ## [1.0.34] - 2026-10-28
 
 ### New
