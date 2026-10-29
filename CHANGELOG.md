@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.0.36] - 2026-10-28
+
+### Fixed
+- **A sync could hang on putting covers and tags into the music files, and Stop didn't work then.**
+  Stop now takes effect file by file. When one file takes over a minute, the log names it; after 5
+  minutes the sync gives up on that file (it stays as it was) and carries on.
+- A cover that can't be loaded (for the music files or folder.jpg) is tried again a day later instead
+  of at every round - also with a time limit of a minute - so the same warning doesn't repeat all night.
+
 ## [1.0.35] - 2026-10-28
 
 ### New

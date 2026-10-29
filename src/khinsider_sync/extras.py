@@ -18,10 +18,13 @@ An existing folder.jpg the app didn't write is never replaced.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import os
 import shutil
+import time
+from typing import Optional
 
 from .catalog import AUDIO_EXTENSIONS, SYNCED_WORDS, album_plan, format_fallback, formats_for
 from .core.util import fs_path
@@ -144,21 +147,33 @@ def missing(root: str, have: dict, want: dict, albums: set) -> list:
     return out
 
 
-async def fetch_covers(client, want: dict, have: dict) -> dict:
+FETCH_RETRY = 86400        # a cover that couldn't be fetched: tried again a day later, not every sync
+FETCH_TIMEOUT = 60         # seconds for one cover, all in
+
+
+async def fetch_covers(client, want: dict, have: dict, failed: Optional[dict] = None) -> dict:
     """Download the covers that aren't synced as images ("fetch") and aren't written yet -> {rel: bytes}.
-    Anything that isn't a JPEG/PNG image (an error page, a challenge) is skipped and tried next time."""
+    Anything that isn't a JPEG/PNG image (an error page, a challenge) is skipped and tried a day later
+    (`failed`: {rel: when}, kept by the engine)."""
+    _failed = {} if failed is None else failed
     got = {}
     for rel, (album, kind, sig, what) in want.items():
         if kind != "folder_art" or what[0] != "fetch" or (have.get(rel) or (None, None, None))[2] == sig:
             continue
+        if time.time() - _failed.get(rel, 0) < FETCH_RETRY:
+            continue
         try:
-            r = await client.get(what[1])
+            r = await asyncio.wait_for(client.get(what[1]), FETCH_TIMEOUT)
         except Exception as e:  # never fail a sync over a cover
-            log.warning("could not fetch the cover for %s: %s", rel, e)
+            _failed[rel] = time.time()
+            log.warning("could not fetch the cover for %s: %s - tried again in a day", rel, e or type(e).__name__)
             continue
         if r.status_code != 200 or not cover_kind(r.content):
-            log.warning("could not fetch the cover for %s (HTTP %s, not an image)", rel, r.status_code)
+            _failed[rel] = time.time()
+            log.warning("could not fetch the cover for %s (HTTP %s, not an image) - tried again in a day",
+                        rel, r.status_code)
             continue
+        _failed.pop(rel, None)
         got[rel] = r.content
     return got
 

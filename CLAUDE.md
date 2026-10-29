@@ -34,7 +34,9 @@ src/khinsider_sync/
   parse.py      every page reader (browse list, latest list, album page, track page, platform list)
   extras.py     optional playlists (.m3u8) and folder.jpg per downloaded album, tracked in `extras`
   covers.py     optional cover and missing tags put into music files (mutagen); files.cover / files.tags,
-                Manifest.resized; one pass at the end of a sync (`Engine._tag_files`, `_finished_albums`)
+                Manifest.resized; one pass at the end of a sync (`Engine._tag_files`, `_finished_albums`).
+                Watchdog: the thread checks Stop per file; TAG_FILE_WARN logs the file, TAG_FILE_LIMIT gives up
+                on it (`_tag_stuck`) - a hung file once froze a sync for 13 min with Stop ignored (Oct 28)
   notify.py     notifications after jobs (ntfy / Gotify / Discord / JSON webhooks), never blocking a job
   account.py    a khinsider account: XenForo sign-in, a paid account's album zips (add_album, My Mass
                 Downloads); used by `Engine._album_zips` / `_one_zip` before the file-by-file queue

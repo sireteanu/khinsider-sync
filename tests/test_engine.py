@@ -903,3 +903,52 @@ def test_the_queue_pace_and_time_left(site, app_factory):
     eng.catalog.save_settings({"queue_resume_at": time.time() + 60})  # the queue goes on
     q = c.get("/api/status").json()["queue"]
     assert q["albums_left"] == 3 and q["eta"] == round(3 / (4 / 120))
+
+
+def _hang_on(monkeypatch, name, secs):
+    """covers.update takes `secs` for the file named `name` (a stalled disk / share)."""
+    from khinsider_sync import covers
+    real = covers.update
+
+    def slow(path, ext, cover=None, tags=None):
+        if os.path.basename(path) == name:
+            time.sleep(secs)
+        return real(path, ext, cover, tags)
+    monkeypatch.setattr(covers, "update", slow)
+
+
+def test_a_file_whose_tagging_hangs_is_given_up_on(site, app_factory, monkeypatch):
+    from khinsider_sync import engine as eng_mod
+    monkeypatch.setattr(eng_mod, "TAG_FILE_WARN", 0.5)
+    monkeypatch.setattr(eng_mod, "TAG_FILE_LIMIT", 1.5)
+    _hang_on(monkeypatch, "02. Title Screen.mp3", 6)
+    c = app_factory(site, settings={"embed_cover": True})
+    t0 = time.monotonic()
+    st = first_sync(c)
+    assert time.monotonic() - t0 < 6, "didn't wait for the hung file"
+    lines = log_lines(st)
+    assert any("Still putting the cover / tags into Super Mario World/02. Title Screen.mp3" in m for m in lines)
+    assert any("Gave up on Super Mario World/02. Title Screen.mp3" in m for m in lines)
+    album_dir = c.data / "Super Mario World"
+    assert pictures(album_dir / "01. Nintendo Logo.mp3"), "the files before it are tagged"
+    assert st["job"]["phase"] == "done"
+
+
+def test_stop_works_while_a_file_is_being_tagged(site, app_factory, monkeypatch):
+    import threading
+    from conftest import scan, select, wait
+    _hang_on(monkeypatch, "01. Nintendo Logo.mp3", 4)
+    c = app_factory(site, settings={"embed_cover": True})
+    scan(c)
+    select(c, "a:" + SMW)
+    c.post("/api/sync")
+    t0 = time.monotonic()
+    while time.monotonic() - t0 < 20:
+        if "covers and tags" in (c.get("/api/status").json()["job"] or {}).get("phase", ""):
+            break
+        time.sleep(0.05)
+    threading.Timer(0.3, lambda: c.post("/api/stop")).start()
+    t1 = time.monotonic()
+    st = wait(c, 20)
+    assert time.monotonic() - t1 < 3.5, "stopped without waiting for the file"
+    assert st["job"]["phase"] == "stopped"

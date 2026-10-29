@@ -8,6 +8,7 @@ import logging
 import os
 import re
 import shutil
+import threading
 import time
 import zipfile
 from collections import deque
@@ -109,6 +110,9 @@ def track_name(f: dict) -> str:
 
 SUMMARY_EVERY = 1800     # a long queue sums up its rounds in the log this often (and at its end)
 LEFTOVER_EVERY = 1800    # during a long queue, the download folder is checked for leftovers this often
+TAG_FILE_WARN = 60       # seconds on one music file's cover / tags before the log says so
+TAG_FILE_LIMIT = 300     # ... before the sync gives up on that file and carries on
+COVER_TIMEOUT = 60       # seconds to load an album's cover, all in
 COVER_RETRY = 86400      # an album whose cover couldn't be loaded: the next try a day later
 READ_BATCH = 10          # default of albums_per_batch: album pages a sync reads before downloading them
 
@@ -222,7 +226,9 @@ class Engine:
         self._leftovers_at = 0.0                 # the last leftover check during a sync
         self._round = 0                          # rounds of the queue in this job (albums_per_batch)
         self._pace: deque = deque(maxlen=400)    # (time, albums not read yet) at each round: the queue's pace
-        self._cover_failed: dict = {}            # album slug -> when its cover couldn't be loaded (retry daily)
+        self._cover_failed: dict = {}
+        self._tag_stuck: set = set()
+        self._fetch_failed: dict = {}            # folder image -> when its cover couldn't be fetched (retry daily)             # files whose tagging hung (TAG_FILE_LIMIT): left alone            # album slug -> when its cover couldn't be loaded (retry daily)
         self.catalog = Catalog(os.path.join(config_dir, "catalog.db"))
         self.data_locked = data_locked
         s = self.catalog.settings()
@@ -1296,7 +1302,7 @@ class Engine:
                 have.pop(rel, None)
             if gone:
                 self.catalog.drop_extras(gone)
-            fetched = await extras.fetch_covers(client, want, have) if client is not None else {}
+            fetched = await extras.fetch_covers(client, want, have, self._fetch_failed) if client is not None else {}
             written, removed, dirs = await asyncio.to_thread(extras.apply, self.data_dir, want, have, selected, mode,
                                                              fetched)
             for rel, (album, kind, sig) in written.items():
@@ -1348,7 +1354,11 @@ class Engine:
                         if not want_tags or all(f["tags"] is not None for f in files):
                             continue                 # tried not long ago: once a day, not every sync
                     else:
-                        cover = await self._cover_bytes(client, firsts.get(slug), root)
+                        try:
+                            cover = await asyncio.wait_for(self._cover_bytes(client, firsts.get(slug), root),
+                                                           COVER_TIMEOUT)
+                        except asyncio.TimeoutError:
+                            cover = None
                         if cover is None and firsts.get(slug):
                             self._cover_failed[slug] = time.time()
                         elif cover is not None:
@@ -1375,9 +1385,17 @@ class Engine:
 
                 no_cover = not firsts.get(slug)        # the album has no images at all
 
-                def tag_all(files=files, cover=cover, no_cover=no_cover) -> list:
-                    out = []
+                cur = {"rel": None, "since": 0.0}            # the file being tagged now (the watchdog below)
+                out: list = []
+                halt = threading.Event()
+
+                def tag_all(files=files, cover=cover, no_cover=no_cover, cur=cur, out=out, halt=halt) -> None:
                     for f in files:
+                        if self.stop_requested or halt.is_set():
+                            break                        # Stop works file by file, not only between albums
+                        if f["rel"] in self._tag_stuck:
+                            continue                     # hung before: left as it is
+                        cur["rel"], cur["since"] = f["rel"], time.monotonic()
                         path = os.path.join(root, *f["rel"].split("/"))
                         c = cover if (f["cover"] is None and want_cover) else None
                         t = tags_of(f) if (f["tags"] is None and want_tags) else None
@@ -1392,9 +1410,33 @@ class Engine:
                             rc, rt = ("skipped" if c else None), ("skipped" if t is not None else None)
                         changed = "added" in (rc, rt)
                         out.append((f, rc, rt, os.path.getsize(path) if changed else None))
-                    return out
+                    cur["rel"] = None
 
-                for f, rc, rt, size in await asyncio.to_thread(tag_all):
+                # a thread can't be killed: when one file hangs (a stalled disk or share, a file mutagen
+                # can't get through), the sync stops waiting for it, names it in the log and carries on
+                task = asyncio.ensure_future(asyncio.to_thread(tag_all))
+                warned = None
+                while not task.done():
+                    await asyncio.wait({task}, timeout=2)
+                    rel, took = cur["rel"], time.monotonic() - cur["since"]
+                    if task.done():
+                        break
+                    if self.stop_requested:
+                        halt.set()
+                        await asyncio.wait({task}, timeout=1)   # a file under way gets a moment to finish
+                        break
+                    if rel and took >= TAG_FILE_WARN and warned != rel:
+                        warned = rel
+                        log.warning("Still putting the cover / tags into %s after %d s - the download folder "
+                                    "may be very slow", rel, took)
+                    if rel and took >= TAG_FILE_LIMIT:
+                        self._tag_stuck.add(rel)
+                        halt.set()
+                        log.warning("Gave up on %s after %d minutes - it stays as it is (not tagged); the sync "
+                                    "carries on. If the download folder is on a disk or share that stopped "
+                                    "answering, check it.", rel, took // 60)
+                        break
+                for f, rc, rt, size in list(out):
                     self.catalog.set_tagged(f["url"], rc, rt, size)
                     if size is not None:
                         manifest.resized(f["rel"], size)
