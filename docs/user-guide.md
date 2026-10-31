@@ -129,8 +129,10 @@ Downloading box shows each file. You can **Stop** at any time - the next sync co
 stopped, also after a restart or a power cut.
 
 A long list of new albums goes **a round at a time** (see Albums at a time above), all in
-the same sync. The log then keeps one line a round ("Sync finished: …") besides the files, and sums
-the queue up every half hour and at its end. The box is then called **This run**: its size and time cover only the albums read
+the same sync. The log then keeps one line a round, naming its albums ("Sync finished (Puyo Puyo
+Fever): 45 new …"), and sums the queue up every half hour and at its end - with how many pages
+FlareSolverr fetched. The full log is `khinsider-sync.log` in the config folder (the last 30 MB);
+the page shows the last 2,000 lines. The box is then called **This run**: its size and time cover only the albums read
 so far, and the line under it says how many albums follow - their size isn't known until their
 pages are read.
 

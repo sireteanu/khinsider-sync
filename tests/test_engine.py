@@ -952,3 +952,43 @@ def test_stop_works_while_a_file_is_being_tagged(site, app_factory, monkeypatch)
     st = wait(c, 20)
     assert time.monotonic() - t1 < 3.5, "stopped without waiting for the file"
     assert st["job"]["phase"] == "stopped"
+
+
+def test_durations_read_well():
+    from khinsider_sync.engine import _names, _span
+    assert [_span(s) for s in (45, 60, 1918, 5890, 6 * 3600 + 1200, 20 * 3600 + 600, 50 * 3600)] == \
+        ["45 s", "1 min", "32 min", "1 h 38 min", "6 h 20 min", "20 h", "2 days 2 h"]
+    assert _names(["A"]) == "A" and _names(["A", "B"]) == "A and B"
+    assert _names(list("ABCDEF")) == "A, B, C and 3 more"
+
+
+def test_round_lines_name_their_albums(site, app_factory):
+    c = app_factory(site, settings={"albums_per_batch": 1, "album_art": False})
+    scan(c)
+    select(c, "a:" + SMW)
+    st = sync(c)
+    assert any(m.startswith("Sync finished (Super Mario World): 3 new") for m in log_lines(st))
+
+
+def test_a_webp_cover_is_converted(site, app_factory):
+    """khinsider serves some covers as WebP (under a .jpg name): folder.jpg and the music files get a JPEG."""
+    import io
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGB", (8, 8), (200, 30, 30)).save(buf, "WEBP")
+    site.image_bytes = {"Cover.jpg": buf.getvalue()}
+    c = app_factory(site, settings={"folder_art": True, "embed_cover": True, "formats": "first:.mp3"})
+    st = first_sync(c)
+    album_dir = c.data / "Super Mario World"
+    folder = (album_dir / "folder.jpg").read_bytes()
+    assert folder[:3] == b"\xff\xd8\xff", "a real JPEG"
+    assert pictures(album_dir / "01. Nintendo Logo.mp3")[0][:3] == b"\xff\xd8\xff"
+    assert not any("could not fetch the cover" in m for m in log_lines(st))
+
+
+def test_a_cover_that_isnt_an_image_says_what_it_was(site, app_factory):
+    site.image_bytes = {"Cover.jpg": b"<!DOCTYPE html><html><body>nope</body></html>"}
+    c = app_factory(site, settings={"folder_art": True, "formats": "first:.mp3"})
+    st = first_sync(c)
+    assert any("could not fetch the cover for Super Mario World/folder.jpg (it came as a web page" in m
+               for m in log_lines(st))

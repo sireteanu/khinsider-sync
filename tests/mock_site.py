@@ -200,7 +200,8 @@ class MockSite:
         self.solver_sessions: list = []    # the FlareSolverr session each request named
         self.solver_created = 0            # sessions.create calls     # names of the cookies each FlareSolverr request carried
         self.robots_extra = ""             # more robots.txt lines
-        self.broken_images: set = set()    # image names that answer 404 (listed on the page, file gone)
+        self.broken_images: set = set()
+        self.image_bytes: dict = {}        # image name -> the bytes served for it (a WebP cover, a web page)    # image names that answer 404 (listed on the page, file gone)
         self.player = True                 # album pages carry the music player's packed track list
         # khinsider accounts: {login: (password, paid)}; paid ones may download whole albums as zips
         self.accounts: dict = {}
@@ -343,6 +344,8 @@ class MockSite:
                     if not a or name not in a["images"] or name in site.broken_images:
                         return self._send(404, "")
                     self._counted = True                               # images aren't counted
+                    if name in site.image_bytes:                       # served as something else
+                        return self._serve_bytes(site.image_bytes[name], "image/jpeg")
                     return self._serve(slug, name)
                 if len(parts) != 3:
                     return self._send(404, "")

@@ -28,7 +28,7 @@ def test_a_scan_gets_past_the_check_with_one_flaresolverr_request(site, app_fact
     later = [h for p, h in site.requests if p.startswith("/game-soundtracks/browse/") and "X-Mock-Browser" not in h]
     assert later and all("cf_clearance=" + site.CLEARANCE in h.get("Cookie", "") for h in later[-3:])
     assert all(h.get("User-Agent") == site.SOLVER_UA for h in later[-3:])
-    assert any("asking FlareSolverr" in m for m in log_lines(st))
+    assert c.app.state.engine.solve_state.asked == 1, "counted (its line is at debug level now)"
 
 
 def test_only_one_cookie_header_goes_out(site, app_factory):

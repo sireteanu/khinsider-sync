@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.0.37] - 2026-10-30
+
+### Improved
+- **Each round's line names its albums**: "Sync finished (Puyo Puyo Fever 1 & 2): 45 new, …" - with
+  album zips the log never named the album before.
+- **FlareSolverr no longer fills the log**: the line for every page it fetches is gone; the queue's
+  summary counts them instead ("FlareSolverr got 91 pages past khinsider's browser check").
+- **Durations read well**: "in 32 min", "about 1 h 38 min" (were "31.9719 minutes", "1.63472 hour").
+- **Longer log**: the page keeps the last 2,000 lines (was 400, about 12 hours of a queue), and the log
+  file in the config folder keeps 30 MB (was 6 MB).
+
+### Fixed
+- **Covers khinsider serves as WebP or GIF** (under a `.jpg` name) were refused as "not an image";
+  they're converted to JPEG now, for folder.jpg and the music files. A cover that still can't be used
+  says what came instead ("it came as a web page").
+
 ## [1.0.36] - 2026-10-28
 
 ### Fixed

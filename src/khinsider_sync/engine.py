@@ -52,7 +52,7 @@ def browser_headers(base: str) -> dict:
 class LogBuffer(logging.Handler):
     """Keeps the last lines of the log for the web interface."""
 
-    def __init__(self, size: int = 400):
+    def __init__(self, size: int = 2000):
         super().__init__(logging.INFO)
         self.lines: deque = deque(maxlen=size)
         self.counter = 0
@@ -225,10 +225,11 @@ class Engine:
         self.solve_state = solver.SolveState()   # FlareSolverr's cookie + User-Agent, kept between jobs
         self._leftovers_at = 0.0                 # the last leftover check during a sync
         self._round = 0                          # rounds of the queue in this job (albums_per_batch)
+        self._asked_at_start = 0                 # FlareSolverr requests before this job (for its summary)
         self._pace: deque = deque(maxlen=400)    # (time, albums not read yet) at each round: the queue's pace
-        self._cover_failed: dict = {}
-        self._tag_stuck: set = set()
-        self._fetch_failed: dict = {}            # folder image -> when its cover couldn't be fetched (retry daily)             # files whose tagging hung (TAG_FILE_LIMIT): left alone            # album slug -> when its cover couldn't be loaded (retry daily)
+        self._cover_failed: dict = {}            # album slug -> when its cover couldn't be loaded (retry daily)
+        self._tag_stuck: set = set()             # files whose tagging hung (TAG_FILE_LIMIT): left alone
+        self._fetch_failed: dict = {}            # folder image -> when its cover couldn't be fetched (retry daily)
         self.catalog = Catalog(os.path.join(config_dir, "catalog.db"))
         self.data_locked = data_locked
         s = self.catalog.settings()
@@ -597,6 +598,7 @@ class Engine:
         started = time.time()
         summary: dict = {}
         self._round = 0
+        self._asked_at_start = self.solve_state.asked
         try:
             s = self.catalog.settings()
             self.page_rate = PageRate(float(s.get("pages_per_minute") or 0))
@@ -1044,8 +1046,9 @@ class Engine:
         summary["resume_at"] = resume
         names = self.catalog.albums_by_slug({a for a in got if a})
         summary["got_albums"] = sorted(names[a]["name"] for a in names)
-        log.info("Sync %s: %d new, %d updated, %d resumed, %d failed, %s downloaded%s",
+        log.info("Sync %s%s: %d new, %d updated, %d resumed, %d failed, %s downloaded%s",
                  "stopped" if self.stop_requested else ("paused" if dl.paused else "finished"),
+                 f" ({_names(summary['got_albums'])})" if summary["got_albums"] else "",
                  st["new"], st["updated"], st["resumed"], st["failed"], fmt_bytes(dl.bytes),
                  f" - paused: {dl.paused}" if dl.paused else "")
         return summary
@@ -1478,7 +1481,9 @@ class Engine:
                 data = r.content if r.status_code == 200 else None
             except Exception:
                 data = None
-        mime = covers.mime_of(data or b"")
+        from .extras import usable_cover
+        data = usable_cover(data or b"")             # a WebP / GIF cover becomes a JPEG
+        mime = covers.mime_of(data)
         return (data, mime) if mime else None
 
     async def check_account(self) -> dict:
@@ -1939,10 +1944,12 @@ class Engine:
 
     def _queue_summary(self, sync: dict, started: float, final: bool = False) -> None:
         q = self._queue_status() or {}
-        log.info("Queue %s: %d rounds, %d albums, %d files new, %d updated, %d failed, %s in %s%s",
+        asked = self.solve_state.asked - self._asked_at_start
+        log.info("Queue %s: %d rounds, %d albums, %d files new, %d updated, %d failed, %s in %s%s%s",
                  "done" if final else "so far", sync.get("batches") or 1, len(sync.get("got_albums") or []),
                  sync.get("new") or 0, sync.get("updated") or 0, sync.get("failed") or 0,
                  fmt_bytes(sync.get("bytes") or 0), _span(time.time() - started),
+                 f"; FlareSolverr got {asked:,} pages past khinsider's browser check" if asked else "",
                  f" - {q['albums_left']:,} albums to go" + (f", about {_span(q['eta'])} at this pace" if q.get("eta") else "")
                  if q.get("albums_left") else "")
 
@@ -2029,9 +2036,25 @@ CHALLENGE_WAIT_MAX = 2 * 3600
 
 
 def _span(secs: float) -> str:
-    if secs < 120:
-        return f"{secs / 60:g} minute"
-    return f"{secs / 3600:g} hours" if secs >= 3600 * 2 else f"{secs / 3600:g} hour" if secs >= 3600 else f"{secs / 60:g} minutes"
+    """'45 s', '1 min', '32 min', '1 h 38 min', '20 h', '2 days 3 h'."""
+    secs = max(0, int(round(secs)))
+    if secs < 60:
+        return f"{secs} s"
+    mins = (secs + 30) // 60
+    if mins < 60:
+        return f"{mins} min"
+    h, m = divmod(mins, 60)
+    if h < 48:
+        return f"{h} h" + (f" {m} min" if m and h < 10 else "")
+    d, h = divmod(h, 24)
+    return f"{d} days" + (f" {h} h" if h else "")
+
+
+def _names(names: list, most: int = 3) -> str:
+    """'A', 'A, B and C', 'A, B, C and 4 more' - the albums a round got."""
+    if len(names) <= most:
+        return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+    return ", ".join(names[:most]) + f" and {len(names) - most} more"
 
 
 _RUN_SUMS = ("total", "albums", "to_fetch", "new", "updated", "resumed", "up to date", "already in folder",

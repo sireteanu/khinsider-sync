@@ -32,7 +32,8 @@ src/khinsider_sync/
   scanner.py    scan_site() reads /console-list + every browse page; scan_latest() the home page's newest
                 albums (quick scan, falls back to a full scan); read_albums() reads album pages
   parse.py      every page reader (browse list, latest list, album page, track page, platform list)
-  extras.py     optional playlists (.m3u8) and folder.jpg per downloaded album, tracked in `extras`
+  extras.py     optional playlists (.m3u8) and folder.jpg per downloaded album, tracked in `extras`;
+                `usable_cover` turns WebP/GIF covers into JPEG (Pillow) - also for embedded covers
   covers.py     optional cover and missing tags put into music files (mutagen); files.cover / files.tags,
                 Manifest.resized; one pass at the end of a sync (`Engine._tag_files`, `_finished_albums`).
                 Watchdog: the thread checks Stop per file; TAG_FILE_WARN logs the file, TAG_FILE_LIMIT gives up
@@ -53,6 +54,7 @@ src/khinsider_sync/
                 change things). Only cf_*/__cf* cookies are taken into the ONE cookie store, with its
                 User-Agent (only together with such a cookie); SolveState on the Engine, kept between jobs.
                 One FlareSolverr session reused (SolveState.session, ttl 30 min; dropped after a failure).
+                Its per-page line is debug; SolveState.asked is counted in `_queue_summary`.
                 Failure: 60 s cooldown, usual wait. browser._jar unwraps `.inner` - without that, account
                 cookies landed in httpx's dropped jar (1.0.31 bug)
     browser.py  ChromeTransport (httpx transport over curl_cffi impersonating Chrome; maps curl errors

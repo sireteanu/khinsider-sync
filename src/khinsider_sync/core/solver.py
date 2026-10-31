@@ -127,6 +127,7 @@ class SolveState:
         self.user_agent = ""
         self.solved_at = 0.0
         self.failed_at = 0.0        # FlareSolverr's last failure (no new attempt for `cooldown`)
+        self.asked = 0              # pages FlareSolverr was asked for (since the app started)
         self.session: Optional[str] = None   # FlareSolverr's browser session we reuse
         self.session_url = ""                # ... on this FlareSolverr
         self.solves = 0
@@ -226,7 +227,8 @@ class SolverTransport(httpx.AsyncBaseTransport):
         st = self.state
         if time.time() - st.failed_at < self.cooldown:
             return None                                    # it just failed: wait as usual
-        log.info("Cloudflare browser check on %s - asking FlareSolverr", request.url.path)
+        st.asked += 1                                      # counted in the log's queue summary
+        log.debug("Cloudflare browser check on %s - asking FlareSolverr", request.url.path)
         if st.session_url != self.solver.url:              # another FlareSolverr: its own session
             st.session, st.session_url = None, self.solver.url
         if st.session is None:

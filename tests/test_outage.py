@@ -139,7 +139,7 @@ def test_a_browser_check_waits_and_tries_again_by_itself(site, app_factory):
     st = sync(c)                                   # the album page gets the check
     assert 55 < st["queue_resume_at"] - t0 < 65 and st["challenge_retries"] == 1
     assert "trying again at" in st["job"]["message"]
-    assert any("Paused for 1 minute because of khinsider's browser check" in m for m in log_lines(st))
+    assert any("Paused for 1 min because of khinsider's browser check" in m for m in log_lines(st))
     assert not eng.resume_queue(), "not before its time"
     waits = []
     for _ in range(5):                             # still checked: the wait doubles, up to 2 hours

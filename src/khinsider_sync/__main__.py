@@ -82,7 +82,7 @@ def main(argv=None) -> int:
     # a log file next to the catalog, so a window that closed too fast can still be explained
     log_file = os.path.join(config_dir, "khinsider-sync.log")
     try:
-        fh = logging.handlers.RotatingFileHandler(log_file, maxBytes=2_000_000, backupCount=2, encoding="utf-8")
+        fh = logging.handlers.RotatingFileHandler(log_file, maxBytes=5_000_000, backupCount=5, encoding="utf-8")
         fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
         fh.setLevel(logging.INFO)
         logging.getLogger().addHandler(fh)

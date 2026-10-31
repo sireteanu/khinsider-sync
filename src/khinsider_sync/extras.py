@@ -78,6 +78,42 @@ def cover_kind(data: bytes) -> str:
     return ""
 
 
+def image_kind(data: bytes) -> str:
+    """What the bytes are: jpeg, png, webp, gif, html, or '' - for covers and the log."""
+    if cover_kind(data):
+        return {".jpg": "jpeg", ".png": "png"}[cover_kind(data)]
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "webp"
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return "gif"
+    head = data[:512].lstrip().lower()
+    if head.startswith((b"<!doctype", b"<html", b"<?xml", b"<head", b"<body")):
+        return "html"
+    return ""
+
+
+def usable_cover(data: bytes) -> bytes:
+    """A cover as JPEG or PNG: JPEG/PNG as they are, WebP and GIF (khinsider serves some covers
+    so, under a .jpg name) converted to JPEG with Pillow. b"" when it isn't an image we can use."""
+    if cover_kind(data):
+        return data
+    if image_kind(data) in ("webp", "gif") and can_convert():
+        try:
+            return to_jpeg(data)
+        except Exception:
+            return b""
+    return b""
+
+
+def describe(data: bytes, content_type: str = "") -> str:
+    """'a WebP image', 'a web page', '1,234 bytes of unknown data' - for warnings."""
+    k = image_kind(data)
+    what = {"webp": "a WebP image", "gif": "a GIF image", "html": "a web page"}.get(k)
+    if not what:
+        what = f"{len(data):,} bytes of unknown data"
+    return what + (f", {content_type}" if content_type else "")
+
+
 def plan(engine, s: dict, slugs) -> dict:
     """{rel: (album, kind, sig, what)} the given (ticked, downloaded) albums should have now.
     `what`: the playlist's text; for a folder image ("copy", saved rel) or ("fetch", image url)."""
@@ -168,13 +204,17 @@ async def fetch_covers(client, want: dict, have: dict, failed: Optional[dict] = 
             _failed[rel] = time.time()
             log.warning("could not fetch the cover for %s: %s - tried again in a day", rel, e or type(e).__name__)
             continue
-        if r.status_code != 200 or not cover_kind(r.content):
+        data = usable_cover(r.content) if r.status_code == 200 else b""
+        if not data:
             _failed[rel] = time.time()
-            log.warning("could not fetch the cover for %s (HTTP %s, not an image) - tried again in a day",
-                        rel, r.status_code)
+            why = (f"HTTP {r.status_code}" if r.status_code != 200 else
+                   "it came as " + describe(r.content, r.headers.get("content-type", "")))
+            if image_kind(r.content) in ("webp", "gif") and not can_convert():
+                why += " - Pillow is needed to convert it"
+            log.warning("could not fetch the cover for %s (%s) - tried again in a day", rel, why)
             continue
         _failed.pop(rel, None)
-        got[rel] = r.content
+        got[rel] = data
     return got
 
 
